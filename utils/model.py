@@ -6,6 +6,8 @@ import re
 import psutil
 from accelerate import infer_auto_device_map, dispatch_model
 
+from accelerate.hooks import remove_hook_from_submodules
+from copy import deepcopy
 
 def get_llm(model_name,
             local_files_only=False,
@@ -23,15 +25,26 @@ def get_llm(model_name,
     lm_eval_model = lm_eval.api.registry.get_model("hf").create_from_arg_string(
         model_args,
         {
+            'parallelize': True, # parallelize across gpu
             "device": None, # We load the model to GPU for proper inference through LM-Eval
         },
     )
-    # We load the model back to CPU for pruning and other manipulations
-    model = lm_eval_model._model.cpu()
+    model = lm_eval_model._model
+
+    orig_device_map = deepcopy(model.hf_device_map)
+
+    device_map = {'': 'cpu'}
+    model = dispatch_model(model, device_map=device_map)
+    
+    # Get rid of all the hooks that accelerate adds
+    remove_hook_from_submodules(model)
+    
+    # model = lm_eval_model._model
+    
     torch.cuda.empty_cache()
     model.config.max_position_embeddings = seqlen
     model.seqlen = seqlen
-    return model, lm_eval_model
+    return model, lm_eval_model, orig_device_map
 
 
 def add_empty_lora(
@@ -97,7 +110,7 @@ def get_max_memory():
     return max_memory
 
 
-def distribute_model(model, activation_buffer_percentage=0.30):
+def distribute_model(model, activation_buffer_percentage=0.30, device_map=None):
     """
     Distribute the model across all available GPUs
     """
@@ -112,14 +125,17 @@ def distribute_model(model, activation_buffer_percentage=0.30):
         max_memory[device] = f"{mem // 1e9}GB"
     layer_list = get_layers_list(model)
 
-    device_map = infer_auto_device_map(
-        model,
-        max_memory=max_memory,
-        no_split_module_classes=[str(type(layer_list[0])).split('.')[-1]],
-    )
-    if any(d == 'meta' for d in device_map.values()):
-        raise ValueError("Device map contains 'meta'. This shouldn't happen if model is already on CPU.")
+    if device_map is None:
+        device_map = infer_auto_device_map(
+            model,
+            max_memory=max_memory,
+            no_split_module_classes=[str(type(layer_list[0])).split('.')[-1]],
+        )
+        if any(d == 'meta' for d in device_map.values()):
+            raise ValueError("Device map contains 'meta'. This shouldn't happen if model is already on CPU.")
+        
     model = dispatch_model(model, device_map=device_map)
+    
     return model
 
 

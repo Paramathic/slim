@@ -1,11 +1,16 @@
 export HF_DATASETS_TRUST_REMOTE_CODE="1"
 export HF_HOME="data"
-# export HF_DATASETS_OFFLINE="1"
-# export HF_HUB_OFFLINE="1"
 
-HF_TOKEN="--hf_token HF_TOKEN"
+# For offline
+export HF_DATASETS_OFFLINE="1"
+export HF_HUB_OFFLINE="1"
 
-for MODEL_NAME in opt llama2
+export CUDA_VISIBLE_DEVICES="2,3,4,5"  # Change to correct GPU IDs accordingly
+
+export TOKENIZERS_PARALLELISM=false
+export TORCH_USE_CUDA_DSA=1
+
+for MODEL_NAME in llama3.1
 do
     if [ $MODEL_NAME == 'llama2' ]
     then
@@ -25,26 +30,26 @@ do
     elif [ $MODEL_NAME == 'llama3.1' ]
     then
         MODEL_PREFIX=meta-llama/Llama-3.1-
-        MODEL_SIZE_LIST="8B"
+        MODEL_SIZE_LIST="70B"
         MODEL_POSTFIX=""
     fi
 
 
     for MODEL_SIZE in $MODEL_SIZE_LIST
     do
-        for STRUCTURE in 2:4 unstructured
+        for STRUCTURE in 2:4
         do
-            for METHOD in wanda #maskllm sparsegpt joint_pq
+            for METHOD in wanda sparsegpt #maskllm sparsegpt joint_pq
             do
-                for LORA_RANK in 0 0.1
+                for LORA_RANK in 0
                 do
-                    for SLIM_LORA in '--slim_lora' #''
+                    for SLIM_LORA in '' #''
                     do
                         for NUM_CALIBRATION_SAMPLES in 128
                         do
-                            for QUANTIZE_WEIGHT in '--quantize_weight' # ''
+                            for QUANTIZE_WEIGHT in '--quantize_weight'
                             do
-                                for TILED_WEIGHT_QUANTIZATION in '' #'--tiled_weight_quantization'
+                                for TILED_WEIGHT_QUANTIZATION in '--tiled_weight_quantization' #'--tiled_weight_quantization'
                                 do
                                     LOCAL_FILES_ONLY='--local_files_only'
                                     SPARSITY_RATIO=0.5
@@ -52,7 +57,7 @@ do
                                     EVAL_DATASET='wikitext2'
                                     BITWIDTH=4
                                     INPUT_GROUP_SIZE=128
-                                    SLIM_QUANT='--slim_quant'
+                                    # SLIM_QUANT='--slim_quant'
                                     EVAL_BATCH_SIZE=1
                                     SEPARATE_LORA='--separate_lora'
                                     TEST_LMHARNESS='--test_lmharness'
@@ -72,7 +77,7 @@ do
 #                                    SCALE_IMPORTANT_WEIGHTS='--scale_important_weights'
                                     # MASKLLM_CHECKPOINT="--maskllm_checkpoint Vinnnf/LLaMA-2-7B-MaskLLM-C4"
 
-                                    CUDA_VISIBLE_DEVICES=0 python main.py \
+                                    python main.py \
                                         --model ${MODEL_PREFIX}${MODEL_SIZE}${MODEL_POSTFIX} \
                                         --prune_method $METHOD \
                                         --sparsity_ratio $SPARSITY_RATIO \
