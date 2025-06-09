@@ -12,9 +12,6 @@ from slim.quantization.quantization import attach_input_quantization_hooks
 from utils.model import get_llm, distribute_model
 from slim.fine_tune import fine_tune
 import lm_eval
-from copy import deepcopy
-
-from accelerate import dispatch_model
 
 
 CSV_COLUMNS = ["model", "prune_method", "sparsity_ratio", "sparsity_type", "lora_rank",
