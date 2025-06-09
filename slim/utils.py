@@ -83,8 +83,9 @@ def prune_nm(mat, n, m):
     mask = (torch.zeros_like(mat) == 1)
     for ii in range(mat.shape[1]):
         if ii % m == 0:
-            tmp = mat[:, ii:(ii + m)].float()
-            mask.scatter_(1, ii + torch.topk(tmp, n, dim=1, largest=False)[1], True)
+            tmp = mat[:, ii:(ii + m)]
+            topk = torch.topk(tmp, n, dim=1, largest=False)[1]
+            mask.scatter_(1, ii + topk, True)
     return mask
 
 

@@ -1,11 +1,12 @@
-transformers==4.45.0
+transformers==4.47.1
 datasets==3.0.1
 sentencepiece
-accelerate==0.34.2
+accelerate==1.7.0
+torch==2.4.0
 einops
 tensorboardX
 absl-py
 h5py
-lm_eval==0.4.5
-vllm
+lm_eval==0.4.4
+vllm==0.5.4
 flash-attn
