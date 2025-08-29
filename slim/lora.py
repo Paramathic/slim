@@ -56,7 +56,8 @@ def prune_and_optimize_lora(
 def quantize_lora(
         model,
         bitwidth=8,
-        lora_tile_size=256
+        lora_tile_size=256,
+        column_wise_grouping=False
 ):
     """
     Quantize the LoRA matrices in a model.
@@ -64,7 +65,8 @@ def quantize_lora(
     Args:
         model: nn.Module, The model to quantize
         bitwidth: int, The number of bits to quantize the LoRA matrices to
-        lora_tile_size: int, The size of the
+        lora_tile_size: int, The size of the LoRA tiles
+        column_wise_grouping: bool, Whether to use column-wise grouping for quantization
 
     Returns:
         None
@@ -75,6 +77,7 @@ def quantize_lora(
         num_bits=bitwidth,
         block_quantization=True,
         block_dim=lora_tile_size,
+        column_wise_grouping=column_wise_grouping
     )
     layers = get_layers_list(model)
 
@@ -87,13 +90,14 @@ def quantize_lora(
 
         for name in subset:
             progress_bar.set_description(f"Layer {i} - Quantizing LoRA for {name}")
+            device = subset[name].weight.device
 
             quantized_lora_left = quantizer.dequantize_absmax(
-                quantizer.quantize_weight(subset[name].lora_left.data)
+                quantizer.quantize_weight(subset[name].lora_left.data.to(device))
             )
 
             quantized_lora_right = quantizer.dequantize_absmax(
-                quantizer.quantize_weight(subset[name].lora_right.data)
+                quantizer.quantize_weight(subset[name].lora_right.data.to(device))
             )
 
             subset[name].lora_left.data = quantized_lora_left.to(subset[name].weight.dtype)

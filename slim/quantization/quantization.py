@@ -34,7 +34,7 @@ def compute_error(mat, alpha, num_bits):
 def find_optimal_quantiztion_cap(mat, num_bits=8, num_bins=4096, integrate=True):
     if integrate:
         pdf, val = torch.histogram(mat.data.abs().float().flatten().cpu(), bins=num_bins, density=True)
-        pdf, val = pdf.cuda(), val.cuda()
+        pdf, val = pdf.cuda(0), val.cuda(0)
 
         val = (val[:-1] + val[1:]) / 2
         q = num_bits
@@ -96,6 +96,7 @@ class Quantizer:
             slim_quant=False,
             block_quantization=False,
             block_dim=16,
+            column_wise_grouping=True,
     ):
         self.matrix_type = matrix_type
         self.num_bits = num_bits
@@ -106,6 +107,7 @@ class Quantizer:
         self.block_quantization = block_quantization
         self.block_dim = block_dim
         self.important_columns_scaling_factor = (1 / 2.)
+        self.column_wise_grouping = column_wise_grouping
 
     def quantize(
             self,
@@ -143,7 +145,10 @@ class Quantizer:
                 raise NotImplementedError("SLiM-Quant is not supported for block quantization")
 
             self.dtype = mat.dtype
-            self.scaling_factor, _ = compute_quantization_params(mat, self.block_dim, 1, symmetric=True)
+            if self.column_wise_grouping:
+                self.scaling_factor, _ = compute_quantization_params(mat, 1, self.block_dim, symmetric=True)
+            else:
+                self.scaling_factor, _ = compute_quantization_params(mat, self.block_dim, 1, symmetric=True)
             self.scale_important_columns(mat)
             quantized_mat = quantize_tensor(mat, self.scaling_factor, None, self.num_bits)
         else:

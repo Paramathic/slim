@@ -20,7 +20,7 @@ def quantize(x_vals, alpha, beta, q):
     max_val = pow(2., q-1) - 1
 
     if beta is not None:
-        x_vals = (x_vals - beta) / alpha * max_val
+        x_vals = (x_vals - beta) / alpha * 2.0 * max_val
     else:
         x_vals = x_vals / alpha * max_val
     x_vals = tl.clamp(x_vals, -(max_val+1), max_val)
@@ -41,9 +41,9 @@ def dequantize(x_vals, alpha, beta, q):
        """
     max_val = pow(2., q-1) - 1
 
-    x_vals = x_vals.to(tl.float16) / max_val * alpha
+    x_vals = x_vals.to(alpha.dtype) / max_val * alpha
     if beta is not None:
-        x_vals = x_vals + beta
+        x_vals = x_vals / 2.0 + beta
     return x_vals.to(alpha.dtype)
 
 
@@ -124,7 +124,9 @@ def quantize_tensor(x, alphas, betas, q):
     row_block_size, col_block_size = x.shape[0] // alphas.shape[0], x.shape[1] // alphas.shape[1]
     y = torch.empty_like(x, dtype=torch.int8, device=x.device)
     grid = lambda meta: (alphas.shape[0], alphas.shape[1])
-    _quantize_tensor[grid](x, y, alphas, betas, row_block_size, col_block_size, x.shape[1], x.shape[0], q)
+    
+    with torch.cuda.device(x.device):
+        _quantize_tensor[grid](x, y, alphas, betas, row_block_size, col_block_size, x.shape[1], x.shape[0], q)
     return y
 
 
@@ -189,7 +191,8 @@ def dequantize_tensor(x, alphas, betas, q, dtype=torch.float16):
     row_block_size, col_block_size = x.shape[0] // alphas.shape[0], x.shape[1] // alphas.shape[1]
     y = torch.empty_like(x, dtype=dtype)
     grid = lambda meta: (alphas.shape[0], alphas.shape[1])
-    _dequantize_tensor[grid](x, y, alphas, betas, row_block_size, col_block_size, x.shape[1], x.shape[0], q)
+    with torch.cuda.device(x.device):
+        _dequantize_tensor[grid](x, y, alphas, betas, row_block_size, col_block_size, x.shape[1], x.shape[0], q)
     return y
 
 
@@ -264,67 +267,70 @@ def compute_quantization_params(x, block_size_row, block_size_col, symmetric=Fal
     M, N = x_arg.shape
     # heuristics for number of warps
     grid_size = (triton.cdiv(M, block_size_row), triton.cdiv(N, block_size_col))
-    _compute_quantization_params[grid_size](
-        x_arg, alphas, betas,
-        block_size_row, block_size_col, N, M,
-        )
+    with torch.cuda.device(x.device):
+        _compute_quantization_params[grid_size](
+            x_arg, alphas, betas,
+            block_size_row, block_size_col, N, M,
+            )
     return alphas, betas
 
 
 
 if __name__ == "__main__":
     dim1 = 1024
+    b1, b2 = 128, 1
     for dim2 in [512 * i for i in range(2, 32)]:
-        # Allocate memory
-        dtype = torch.bfloat16
-        x = torch.randn(dim1, dim2).cuda().to(dtype) + (torch.randn(1).cuda().to(dtype) * 3.)
-        q = 8
+        
+        for symmetric in [True, False]:
+            # Allocate memory
+            dtype = torch.bfloat16
+            x = torch.randn(dim1, dim2).cuda(0).to(dtype) + (torch.randn(1).cuda(0).to(dtype) * 3.)
+            q = 4
 
-        symmetric = True #False
 
-        alphas, betas = compute_quantization_params(x, 64, 64, symmetric=symmetric)
-        alphas2, betas2 = compute_quantization_params_torch(x, 64, 64, symmetric=symmetric)
-        assert torch.norm(alphas.float() - alphas2.float()) < 1e-2
-        if not symmetric:
-            assert torch.norm(betas.float() - betas2.float()) < 1e-2
+            alphas, betas = compute_quantization_params(x, b1, b2, symmetric=symmetric)
+            alphas2, betas2 = compute_quantization_params_torch(x, b1, b2, symmetric=symmetric)
+            assert torch.norm(alphas.float() - alphas2.float()) < 1e-2
+            if not symmetric:
+                assert torch.norm(betas.float() - betas2.float()) < 1e-2
 
-        # Launch the kernel
-        block_size1 = x.shape[0] // alphas.shape[0]
-        block_size2 = x.shape[1] // alphas.shape[1]
-        y = torch.empty_like(x, dtype=torch.int8)
+            # Launch the kernel
+            block_size1 = x.shape[0] // alphas.shape[0]
+            block_size2 = x.shape[1] // alphas.shape[1]
+            y = torch.empty_like(x, dtype=torch.int8)
 
-        scale = (2.0 ** (q - 1) - 1)
-        for i in range(alphas.shape[0]):
-            for j in range(alphas.shape[1]):
-                block = x[i*block_size1:(i+1)*block_size1, j*block_size2:(j+1)*block_size2]
-                if betas is not None:
-                    y[i*block_size1:(i+1)*block_size1, j*block_size2:(j+1)*block_size2] = torch.round((block - betas[i, j]) / alphas[i, j] * scale).to(torch.int8)
-                else:
-                    y[i*block_size1:(i+1)*block_size1, j*block_size2:(j+1)*block_size2] = torch.round(block / alphas[i, j] * scale).to(torch.int8)
+            scale = (2.0 ** (q - 1) - 1)
+            for i in range(alphas.shape[0]):
+                for j in range(alphas.shape[1]):
+                    block = x[i*block_size1:(i+1)*block_size1, j*block_size2:(j+1)*block_size2]
+                    if betas is not None:
+                        y[i*block_size1:(i+1)*block_size1, j*block_size2:(j+1)*block_size2] = torch.round((block - betas[i, j]) / alphas[i, j] * 2.0 * scale).to(torch.int8)
+                    else:
+                        y[i*block_size1:(i+1)*block_size1, j*block_size2:(j+1)*block_size2] = torch.round(block / alphas[i, j] * scale).to(torch.int8)
 
-        y_triton = quantize_tensor(x, alphas, betas, q)
+            y_triton = quantize_tensor(x, alphas, betas, q)
 
-        error = torch.norm(y.float() - y_triton.float()) / torch.norm(y.float())
-        # print("Quantization - Triton vs Torch: ", error)
-        if q == 4:
-            assert error < 5e-2, error
-        else:
-            assert error < 2e-2, error
+            error = torch.norm(y.float() - y_triton.float()) / torch.norm(y.float())
+            print("Quantization - Triton vs Torch: ", error)
+            if q == 4:
+                assert error < 5e-2, error
+            else:
+                assert error < 2e-2, error
 
-        x_dequant = torch.empty_like(x)
+            x_dequant = torch.empty_like(x)
 
-        for i in range(alphas.shape[0]):
-            for j in range(alphas.shape[1]):
-                block = y[i*block_size1:(i+1)*block_size1, j*block_size2:(j+1)*block_size2]
-                if betas is not None:
-                    x_dequant[i*block_size1:(i+1)*block_size1, j*block_size2:(j+1)*block_size2] = (block.to(torch.float16) / scale * alphas[i, j] + betas[i, j])
-                else:
-                    x_dequant[i*block_size1:(i+1)*block_size1, j*block_size2:(j+1)*block_size2] = (block.to(torch.float16) / scale * alphas[i, j])
+            for i in range(alphas.shape[0]):
+                for j in range(alphas.shape[1]):
+                    block = y[i*block_size1:(i+1)*block_size1, j*block_size2:(j+1)*block_size2]
+                    if betas is not None:
+                        x_dequant[i*block_size1:(i+1)*block_size1, j*block_size2:(j+1)*block_size2] = (block.to(torch.float16) / scale / 2.0 * alphas[i, j] + betas[i, j])
+                    else:
+                        x_dequant[i*block_size1:(i+1)*block_size1, j*block_size2:(j+1)*block_size2] = (block.to(torch.float16) / scale * alphas[i, j])
 
-        dequant_error = torch.norm(x.float() - x_dequant.float()) / torch.norm(x.float())
-        print("Dequantization - Torch: ", dequant_error)
-        assert dequant_error < 5e-2
-        x_dequant_triton = dequantize_tensor(y_triton, alphas, betas, q, dtype=x.dtype)
-        dequant_error_triton = torch.norm(x.float() - x_dequant_triton.float()) / torch.norm(x.float())
-        print("Dequantization - Triton: ", dequant_error_triton)
-        assert dequant_error_triton < 5e-2
+            dequant_error = torch.norm(x.float() - x_dequant.float()) / torch.norm(x.float())
+            print("Dequantization - Torch: ", dequant_error)
+            assert dequant_error < 5e-2
+            x_dequant_triton = dequantize_tensor(y_triton, alphas, betas, q, dtype=x.dtype)
+            dequant_error_triton = torch.norm(x.float() - x_dequant_triton.float()) / torch.norm(x.float())
+            print("Dequantization - Triton: ", dequant_error_triton)
+            assert dequant_error_triton < 5e-2

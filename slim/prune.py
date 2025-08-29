@@ -79,6 +79,7 @@ def prune_magnitude(
         slim_quant=False,
         tiled_weight_quantization=False,
         weight_tile_size=256,
+        column_wise_grouping=False,
 ):
     """
     Prune a model using magnitude pruning and quantize weights using SLiM-Quant or AbsMax.
@@ -107,13 +108,14 @@ def prune_magnitude(
             slim_quant=slim_quant,
             block_quantization=tiled_weight_quantization,
             block_dim=weight_tile_size,
+            column_wise_grouping=column_wise_grouping
         )
     else:
         quantizer = None
 
     for i in progress_bar:
         progress_bar.set_description(f"Layer {i}")
-        layer = layers[i]
+        layer = layers[i].cuda()
         subset = find_layers(layer)
 
         for name in subset:
@@ -130,11 +132,12 @@ def prune_magnitude(
             if quantizer is not None:
                 quantized_weight = quantizer.quantize_weight(subset[name].weight.data)
                 subset[name].weight.data = quantizer.dequantize_absmax(quantized_weight).to(torch.bfloat16)
+                subset[name].register_buffer("quantization_scaling_factor", quantizer.scaling_factor)
                 if not tiled_weight_quantization:
                     subset[name].scaling_factor = quantizer.scaling_factor
                 else:
                     subset[name].scaling_factor = None
-
+        layer = layer.cpu()
 
 def prune_wanda(
         model,
@@ -160,6 +163,7 @@ def prune_wanda(
         pad_lora=False,
         quantize_first=True,
         scale_important_weights=False,
+        column_wise_grouping=False,
 ):
     """
     Prune a model using WANDA and quantize weights using SLiM-Quant or AbsMax and add low-rank adapter using SLiM or SVD.
@@ -209,6 +213,7 @@ def prune_wanda(
             slim_quant=slim_quant,
             block_quantization=tiled_weight_quantization,
             block_dim=weight_tile_size,
+            column_wise_grouping=column_wise_grouping
         )
     else:
         quantizer = None
@@ -285,6 +290,7 @@ def prune_wanda(
                          )
 
                 if quantizer is not None:
+                    subset[name].register_buffer("quantization_scaling_factor", quantizer.scaling_factor)
                     if not tiled_weight_quantization:
                         subset[name].scaling_factor = quantizer.scaling_factor
                     else:
@@ -331,6 +337,7 @@ def prune_wanda(
                         quantized_weight = quantizer.quantize_weight(subset[name].weight.data, important_weights)
                         subset[name].weight.data = quantizer.dequantize_absmax(quantized_weight).to(torch.bfloat16)
                         if quantizer is not None:
+                            subset[name].register_buffer("quantization_scaling_factor", quantizer.scaling_factor)
                             if not tiled_weight_quantization:
                                 subset[name].scaling_factor = quantizer.scaling_factor
                             else:
@@ -342,6 +349,7 @@ def prune_wanda(
                         quantized_weight = quantizer.quantize_weight(subset[name].weight.data, important_weights)
                         subset[name].weight.data = quantizer.dequantize_absmax(quantized_weight).to(torch.bfloat16)
                         if quantizer is not None:
+                            subset[name].register_buffer("quantization_scaling_factor", quantizer.scaling_factor)
                             if not tiled_weight_quantization:
                                 subset[name].scaling_factor = quantizer.scaling_factor
                             else:
@@ -376,7 +384,7 @@ def prune_sparsegpt(
         bitwidth=4,
         tiled_weight_quantization=False,
         weight_tile_size=256,
-        calibration_dataset="c4"
+        calibration_dataset="c4",
 ):
     """
     Prune a model using SparseGPT and quantize weights using OPTQ (GPTQ).
@@ -462,6 +470,7 @@ def prune_sparsegpt(
             progress_bar.set_description(f"Layer {i} - Pruning and Quantizing {name}")
             gpts[name].fasterprune(sparsity_ratio, prune_n=prune_n, prune_m=prune_m, percdamp=0.01, blocksize=weight_tile_size)
             if quantize_weight:
+                subset[name].register_buffer("quantization_scaling_factor", 1. / gpts[name].quantizer.scaling_factor)
                 if not tiled_weight_quantization:
                     subset[name].scaling_factor = 1. / gpts[name].quantizer.scale[0]
                 else:
@@ -487,11 +496,12 @@ def prune_sparsegpt(
 
 
 def quantize_model(
-       model,
-       bitwidth=4,
-       slim_quant=False,
-       weight_tiled_quantization=False,
-       weight_tile_size=256,
+        model,
+        bitwidth=4,
+        slim_quant=False,
+        weight_tiled_quantization=False,
+        weight_tile_size=256,
+        column_wise_grouping=False,
 ):
     """
     Quantize the model using the AutoQuantizer class.
@@ -512,6 +522,7 @@ def quantize_model(
         slim_quant=slim_quant,
         block_quantization=weight_tiled_quantization,
         block_dim=weight_tile_size,
+        column_wise_grouping=column_wise_grouping
     )
     layers = get_layers_list(model)
 
@@ -519,6 +530,7 @@ def quantize_model(
     
     for i in progress_bar:
         layer = layers[i]
+        layer = layer.cuda()
 
         subset = find_layers(layer)
         
@@ -530,6 +542,12 @@ def quantize_model(
             )
             
             subset[name].weight.data = quantized_weight.to(subset[name].weight.dtype)
+            subset[name].register_buffer("quantization_scaling_factor", quantizer.scaling_factor)
+            if not weight_tiled_quantization:
+                subset[name].scaling_factor = quantizer.scaling_factor
+            else:
+                subset[name].scaling_factor = None
+        layer = layer.cpu()
 
 
 def joint_pq(
@@ -553,6 +571,7 @@ def joint_pq(
         quantize_first=True, 
         pad_lora=False,
         scale_important_weights=False,
+        column_wise_grouping=False,
 ):
     """
     Prune and quantize a model using joint pruning and quantization.
@@ -591,12 +610,13 @@ def joint_pq(
     layers = get_layers_list(model)
 
     quantizer = AutoQuantizer(
-            "weight",
-            num_bits=bitwidth,
-            slim_quant=False,
-            block_quantization=True,
-            block_dim=weight_tile_size,
-        )
+        "weight",
+        num_bits=bitwidth,
+        slim_quant=False,
+        block_quantization=True,
+        block_dim=weight_tile_size,
+        column_wise_grouping=column_wise_grouping
+    )
 
     progress_bar = tqdm.tqdm(range(len(layers)))
 
@@ -700,6 +720,7 @@ def joint_pq(
                             )
 
                 if quantizer is not None:
+                    subset[name].register_buffer("quantization_scaling_factor", quantizer.scaling_factor)
                     subset[name].scaling_factor = None
 
                 if separate_lora:
@@ -739,6 +760,8 @@ def joint_pq(
                 progress_bar.set_description(f"Layer {i} - Quantizing {name}")
                 quantized_weight = quantizer.quantize_weight(subset[name].weight.data, important_weights)
                 subset[name].weight.data = quantizer.dequantize_absmax(quantized_weight).to(torch.bfloat16)
+                subset[name].register_buffer("quantization_scaling_factor", quantizer.scaling_factor)
+                subset[name].scaling_factor = None
 
         inps, outs = outs, inps
         layers[i] = layer.cpu()
@@ -773,6 +796,7 @@ def prune_and_quantize(
         pad_lora=False,
         scale_important_weights=False,
         mask_checkpoint=None,
+        column_wise_grouping=False
 ):
     """
     Prune and quantize a model and add low-rank adapter to it.
@@ -802,6 +826,7 @@ def prune_and_quantize(
         pad_lora: bool - Whether to pad the low-rank adapter to the quantization tile size (whithout quantizing)
         scale_important_weights: bool - Whether to scale the important weights before quantization,
         mask_checkpoint: str - The checkpoint to use for MaskLLM pruning
+        column_wise_grouping: bool - Whether to use column-wise grouping for quantization
 
     Returns:
         None
@@ -812,12 +837,14 @@ def prune_and_quantize(
             if lora_rank > 0:
                 raise NotImplementedError("LoRA approximation not implemented for quantization only - "
                                           "Please use pruning with low sparsity ratio for quantization only.")
-            quantize_model(model,
-                           bitwidth,
-                           slim_quant,
-                           weight_tiled_quantization,
-                           weight_tile_size,
-                           )
+            quantize_model(
+                model,
+                bitwidth,
+                slim_quant,
+                weight_tiled_quantization,
+                weight_tile_size,
+                column_wise_grouping=column_wise_grouping
+            )
         else:
             print("Using original dense model.")
     else:
@@ -890,7 +917,8 @@ def prune_and_quantize(
                 seed,
                 calibration_dataset,
                 pad_lora,
-                scale_important_weights=scale_important_weights
+                scale_important_weights=scale_important_weights,
+                column_wise_grouping=column_wise_grouping
             )
         elif prune_method == "magnitude":
             if scale_important_weights and quantize_weight:
@@ -920,6 +948,7 @@ def prune_and_quantize(
                 slim_quant,
                 weight_tiled_quantization,
                 weight_tile_size,
+                column_wise_grouping=column_wise_grouping
             )
         elif prune_method == "sparsegpt":
             if scale_important_weights and quantize_weight:
@@ -937,6 +966,8 @@ def prune_and_quantize(
                 print(F"Pruning the model with SparseGPT and quantizing the weights using {quantization_method}.")
             else:
                 print("Pruning the model with SparseGPT.")
+            if column_wise_grouping:
+                raise NotImplementedError("Column-wise grouping not implemented for OPTQ")
             prune_sparsegpt(
                 model,
                 tokenizer,
@@ -949,7 +980,7 @@ def prune_and_quantize(
                 bitwidth,
                 weight_tiled_quantization,
                 weight_tile_size,
-                calibration_dataset
+                calibration_dataset,
             )
         elif prune_method == "joint_pq":
             if weight_tiled_quantization is False:
@@ -977,7 +1008,8 @@ def prune_and_quantize(
                 lora_tile_size,
                 separate_lora,
                 pad_lora,
-                scale_important_weights
+                scale_important_weights,
+                column_wise_grouping=column_wise_grouping
             )
         else:
             raise NotImplementedError(f"Pruning method {prune_method} not implemented")

@@ -5,6 +5,8 @@ import subprocess
 import re
 import psutil
 from accelerate import infer_auto_device_map, dispatch_model
+from accelerate.hooks import remove_hook_from_submodules
+from copy import deepcopy
 
 
 def get_llm(model_name,
@@ -23,11 +25,15 @@ def get_llm(model_name,
     lm_eval_model = lm_eval.api.registry.get_model("hf").create_from_arg_string(
         model_args,
         {
+            "parallelize": True, 
             "device": None, # We load the model to GPU for proper inference through LM-Eval
         },
     )
     # We load the model back to CPU for pruning and other manipulations
-    model = lm_eval_model._model.cpu()
+    model = lm_eval_model._model
+    model.device_map = deepcopy(model.hf_device_map)
+    model = dispatch_model(model, device_map={"": "cpu"})
+    remove_hook_from_submodules(model)
     torch.cuda.empty_cache()
     model.config.max_position_embeddings = seqlen
     model.seqlen = seqlen
@@ -37,9 +43,10 @@ def get_llm(model_name,
 def add_empty_lora(
         model,
         lora_tile_size=None,
-        lora_rank=0.01,
+        lora_rank=0.01
 ):
     layer_list = get_layers_list(model)
+    lora_hooks = []
     for i in range(len(layer_list)):
         layer = layer_list[i]
         subset = find_layers(layer)
@@ -62,7 +69,10 @@ def add_empty_lora(
                     module.lora_right) / torch.sqrt(module.lora_rank)
 
             subset[name].lora_rank = torch.tensor(layer_rank)
-            subset[name].register_forward_hook(add_lora_hook)
+            
+            lora_hooks.append(subset[name].register_forward_hook(add_lora_hook))
+            
+    return lora_hooks
 
 
 def contigous_model(model):
@@ -101,22 +111,26 @@ def distribute_model(model, activation_buffer_percentage=0.30):
     """
     Distribute the model across all available GPUs
     """
-    max_memory = get_max_memory()
-    for device in max_memory:
-        if device == "cpu":
-            continue
-        mem = max_memory[device]
-        mem = re.sub(r'[^0-9.]', '', mem)
-        mem = float(mem) * 1024**3
-        mem = int(mem * (1 - activation_buffer_percentage))
-        max_memory[device] = f"{mem // 1e9}GB"
-    layer_list = get_layers_list(model)
+    if hasattr(model, "device_map"):
+        device_map = model.device_map
+        print("Using saved device map: ", device_map)
+    else:
+        max_memory = get_max_memory()
+        for device in max_memory:
+            if device == "cpu":
+                continue
+            mem = max_memory[device]
+            mem = re.sub(r'[^0-9.]', '', mem)
+            mem = float(mem) * 1024**3
+            mem = int(mem * (1 - activation_buffer_percentage))
+            max_memory[device] = f"{mem // 1e9}GB"
+        layer_list = get_layers_list(model)
 
-    device_map = infer_auto_device_map(
-        model,
-        max_memory=max_memory,
-        no_split_module_classes=[str(type(layer_list[0])).split('.')[-1]],
-    )
+        device_map = infer_auto_device_map(
+            model,
+            max_memory=max_memory,
+            no_split_module_classes=[str(type(layer_list[0])).split('.')[-1]],
+        )
     if any(d == 'meta' for d in device_map.values()):
         raise ValueError("Device map contains 'meta'. This shouldn't happen if model is already on CPU.")
     model = dispatch_model(model, device_map=device_map)
@@ -127,7 +141,7 @@ def distribute_model(model, activation_buffer_percentage=0.30):
 if __name__ == "__main__":
     from transformers import AutoTokenizer
 
-    token = None
+    token = "TOKEN"
 
     def load_model_and_tokenizer(model_name):
         print("Loading model", model_name)
@@ -135,17 +149,17 @@ if __name__ == "__main__":
         AutoTokenizer.from_pretrained(model_name, token=token)
 
     #Load OPT models
-    for size in ["125m", "350m", "1.3b", "2.7b", "6.7b", "13b"]:
+    for size in ["13b"]:
         model_name = f"facebook/opt-{size}"
         load_model_and_tokenizer(model_name)
 
     #Load LLaMA-2 models
-    for size in ["7b", "13b"]:
+    for size in ["7b", "13b", "70b"]:
         model_name = f"meta-llama/Llama-2-{size}-hf"
         load_model_and_tokenizer(model_name)
 
-    #Load LLaMA-3.1 models
-    for size in ["8B"]:
+    Load LLaMA-3.1 models
+    for size in ["8B", "70B"]:
         model_name = f"meta-llama/Llama-3.1-{size}"
         load_model_and_tokenizer(model_name)
 
@@ -155,6 +169,6 @@ if __name__ == "__main__":
         load_model_and_tokenizer(model_name)
 
     # Load Gemma-3 models
-    for size in ["1b", "4b", "12b"]:
+    for size in ["12b", "27b"]:
         model_name = f"google/gemma-3-{size}-pt"
         load_model_and_tokenizer(model_name)

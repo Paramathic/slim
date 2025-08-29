@@ -14,13 +14,6 @@ from transformers.testing_utils import CaptureLogger
 from transformers.utils.versions import require_version
 
 
-def dense_linear_forward(module, input):
-    output = torch.matmul(input.half(), module.weight.t())
-    if not module.bias is None:
-        output += module.bias
-    return output.float()
-
-
 def disable_linear_layer_grads(model):
     known_modules = {"Linear", "Conv1d"}
     for name, module in model.named_modules():
@@ -161,6 +154,7 @@ def fine_tune(
         optimizer="adamw_torch",
         global_batch_size=64,
         local_batch_size=1,
+        use_wandb=False,
 ):
     """
     Fine-tune a model on a dataset using HuggingFace Trainer. In case of existence of LoRA, the original weights are
@@ -185,6 +179,7 @@ def fine_tune(
         optimizer: str - The optimizer to use
         global_batch_size: int - The global batch size for training
         local_batch_size: int - The local batch size to run on the device
+        use_wandb: bool - Whether to enable Weights & Biases logging
 
     Returns:
         None
@@ -194,6 +189,10 @@ def fine_tune(
         model = model.float()
     else:
         model = model.to(torch.bfloat16)
+    
+    # Set report_to based on wandb usage
+    report_to = "wandb" if use_wandb else "none"
+    
     training_args = TrainingArguments(
         output_dir="output",
         overwrite_output_dir=True,
@@ -214,8 +213,9 @@ def fine_tune(
         warmup_steps=5,
         optim=optimizer,
         save_strategy="steps",
-        report_to="none",
+        report_to=report_to,
         gradient_checkpointing=True,
+        learning_rate=1e-4,
     )
     ################################################################################################################
     if os.path.exists(f"{cache_dir}/c4-raw.pt"):
@@ -418,5 +418,14 @@ def fine_tune(
         metrics["train_samples"] = min(max_train_samples, len(train_dataset))
 
         trainer.log_metrics("train", metrics)
+        
+        # Log fine-tuning metrics to wandb if enabled
+        if use_wandb:
+            import wandb
+            # Log training metrics with "finetune_" prefix to distinguish from main metrics
+            wandb_metrics = {}
+            for key, value in metrics.items():
+                wandb_metrics[f"finetune_{key}"] = value
+            wandb.log(wandb_metrics)
 
     requantize(model)
