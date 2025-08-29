@@ -158,7 +158,7 @@ if __name__ == "__main__":
         model_name = f"meta-llama/Llama-2-{size}-hf"
         load_model_and_tokenizer(model_name)
 
-    Load LLaMA-3.1 models
+    #Load LLaMA-3.1 models
     for size in ["8B", "70B"]:
         model_name = f"meta-llama/Llama-3.1-{size}"
         load_model_and_tokenizer(model_name)
@@ -168,7 +168,7 @@ if __name__ == "__main__":
         model_name = f"meta-llama/Llama-3.2-{size}"
         load_model_and_tokenizer(model_name)
 
-    # Load Gemma-3 models
+    #Load Gemma-3 models
     for size in ["12b", "27b"]:
         model_name = f"google/gemma-3-{size}-pt"
         load_model_and_tokenizer(model_name)
