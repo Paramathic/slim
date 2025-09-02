@@ -135,6 +135,14 @@ from slim.utils import check_sparsity
 check_sparsity(model)
 ```
 
+**Save Checkpoint:** You can save the compressed model (with the quantization metadata) using `save_model` function. The pruning, quantization, and low-rank adapter arguments will be stored with the model as well for future reference.
+
+```
+from slim.save_model import save_model
+
+save_model(model, args.save_checkpoint_path, args)
+```
+
 **Evaluate Perplexity:** You can evaluate the perplexity of the model using the `eval_ppl` function.
 
 ```python
@@ -159,6 +167,27 @@ bash scripts/run.sh
 ```
 
 **Note:** If your cluster does not have internet access, you can download the models and datasets using the `scripts/download_data.sh` script.
+
+
+## Model Loading and Acceleration
+
+You can load the compressed checkpoints using the `load_compressed_model` function. This function does adds the corresponding low-rank hooks (if used) and prepares the model for accelerated inference. The model compressoin configuration is already saved in the checkpoint using the `save_model` function.
+
+```python
+from slim.load_model_with_acceleration import load_compressed_model
+
+model, tokenizer, args, lora_hooks = load_compressed_model("path/to/model")
+```
+
+For loading the model with acceleration using [Sparse Marlin](https://github.com/IST-DASLab/Sparse-Marlin) backend, you can use `load_and_accelerate_model` function. This function will load the model and prepare it for accelerated inference using Sparse Marlin.
+
+```python
+from slim.load_model_with_acceleration import load_and_accelerate_model
+
+model, tokenizer = load_and_accelerate_model("path/to/model")
+```
+
+For an example of using both of the above functions, you can refer to `slim/load_model_with_acceleration.py` file, which evaluated the perplexity of the loaded model on WikiText2 dataset.
 
 ## Experimental Results
 
@@ -191,7 +220,7 @@ For additional per-task results, please refer to our [Weights & Biases report](h
 | **50% Unstructured**   |                          |          |          |           |           |           |            |              |               |
 | Magnitude              | Group AbsMax             | 33.34    | 33.51    | 32.12     | 39.90     | 36.44     | 32.33      | 47.03        | 51.04         |
 | SparseGPT              | OPTQ                     | 35.10    | 35.13    | 38.72     | 43.43     | 46.97     | 47.38      | 51.09        | 55.94         |
-| Wanda                  | Best Method$^*$          | 35.11    | 33.89    | 41.02     | 42.89     | 46.52     | 46.84      | 53.62        | 56.76         |
+| Wanda                  | Best Method<sup>*</sup>          | 35.11    | 33.89    | 41.02     | 42.89     | 46.52     | 46.84      | 53.62        | 56.76         |
 | JSQ                    | JSQ                      | 32.14    | 30.34    | 38.86     | 35.48     | 42.75     | 30.73      | 52.25        | 57.00         |
 | L<sup>2</sup>QER               | Group AbsMax             | 34.45    | 34.45    | 38.38     | 41.28     | 45.08     | OOM        | 50.60        | OOM           |
 | Naive-LoRA             | Quantization<sup>W</sup>         | 34.77    | 34.23    | 40.40     | 43.37     | 46.64     | 47.30      | 51.52        | 55.33         |
@@ -263,17 +292,6 @@ A100 GPUs. The bright part shows the contribution of the quantization to the tot
 <img src="./assets/rtx3060_speedup.svg" alt="RTX-3060 Speedup" width="600">
 
 <img src="./assets/a100_speedup.svg" alt="A100 Speedup" width="600">
-
-### End-to-End Model Speedup
-
-For end-to-end model speedup experiments, you can run `scripts/model_speeup.sh`. This script will 
-run `speedup/model_speedup.py` file, which supports dense, spase-quantized, and SLiM (with both 
-FP16 and INT4 LoRA)
-model evaluations. Currently, the models are pruned using magnitude pruning and quantized
-using AbsMax. Loading the quantized checkpoints should be a straightforward modification
-to the code, and we will support it in the future. We do not report the end-to-end speedup
-here, since most of the time, the dense FP16 models (baseline) do not fit in a single
-GPU with the batch sizes 16 to 64.
 
 ## Memory Reduction Experiments
 

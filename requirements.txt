@@ -8,7 +8,6 @@ absl-py
 h5py
 lm_eval==0.4.2
 vllm==0.10.0
-torch==2.7.1
 flash-attn
 triton
 wandb
