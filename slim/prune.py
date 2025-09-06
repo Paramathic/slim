@@ -884,15 +884,27 @@ def prune_and_quantize(
                 assert mask_checkpoint is not None, "Mask checkpoint must be provided for MaskLLM pruning"
                 assert prune_n == 2 and prune_m == 4, "MaskLLM pruning only supports 2:4 sparsity ratio"
                 try:
-                    downloaded_mask = hf_hub_download(repo_id=mask_checkpoint, filename="mask_compressed.npz")
-                    mask_ckpt = np.load(downloaded_mask)
-                    for k, v in mask_ckpt.items():
-                        k_original = k.replace(".mask", "")
-                        v = np.unpackbits(v)  # to bits
-                        mask = torch.from_numpy(v).float()
-                        param = dict(model.named_parameters()).get(k_original, None)
-                        mask = mask.view(*param.shape)
-                        param.mask = (mask == 0).bool()
+                    if mask_checkpoint.endswith(".pt"):
+                        with torch.no_grad():
+                            checkpoint = torch.load(mask_checkpoint, map_location="cpu")
+                            for k, v in checkpoint.items():
+                                if v.dim() == 2:
+                                    mask = (v == 0)
+                                    param = dict(model.named_parameters()).get(k, None)
+                                    if param is None:
+                                        print(f"Parameter {k} not found in the model.")
+                                    else:
+                                        param.mask = mask
+                    else:
+                        downloaded_mask = hf_hub_download(repo_id=mask_checkpoint, filename="mask_compressed.npz")
+                        mask_ckpt = np.load(downloaded_mask)
+                        for k, v in mask_ckpt.items():
+                            k_original = k.replace(".mask", "")
+                            v = np.unpackbits(v)  # to bits
+                            mask = torch.from_numpy(v).float()
+                            param = dict(model.named_parameters()).get(k_original, None)
+                            mask = mask.view(*param.shape)
+                            param.mask = (mask == 0).bool()
                 except FileNotFoundError:
                     raise FileNotFoundError("Mask checkpoint not found. Please provide a valid checkpoint.")
             prune_wanda(
