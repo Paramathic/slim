@@ -7,6 +7,7 @@ from datasets import load_dataset, load_from_disk
 import os
 import tqdm.auto as tqdm
 
+
 # Set seed for reproducibility
 def set_seed(seed):
     """
@@ -21,13 +22,16 @@ def set_seed(seed):
     np.random.seed(seed)
     torch.random.manual_seed(seed)
 
+
 # Wrapper for tokenized input IDs
 class TokenizerWrapper:
     """
     Wrapper for tokenized input IDs
     """
+
     def __init__(self, input_ids):
         self.input_ids = input_ids
+
 
 # Load and process wikitext2 dataset
 def get_wikitext2(seed, tokenizer):
@@ -45,14 +49,15 @@ def get_wikitext2(seed, tokenizer):
     """
     print("Loading WikiText2 dataset.")
     # Load train and test datasets
-    testdata = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test')
+    testdata = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
     # Encode datasets
-    testenc = tokenizer("\n\n".join(testdata['text']), return_tensors='pt')
+    testenc = tokenizer("\n\n".join(testdata["text"]), return_tensors="pt")
 
     # Generate samples from training set
     random.seed(seed)
     trainloader = []
     return trainloader, testenc
+
 
 # Load and process c4 dataset
 def get_c4(nsamples, seed, seqlen, tokenizer):
@@ -77,12 +82,30 @@ def get_c4(nsamples, seed, seqlen, tokenizer):
         valdata = load_from_disk(f"data/c4-val.pt")
     else:
         try:
-            traindata = load_dataset('allenai/c4', 'allenai--c4', data_files={'train': 'en/c4-train.00000-of-01024.json.gz'}, split='train')
-            valdata = load_dataset('allenai/c4', 'allenai--c4', data_files={'validation': 'en/c4-validation.00000-of-00008.json.gz'}, split='validation')
+            traindata = load_dataset(
+                "allenai/c4",
+                "allenai--c4",
+                data_files={"train": "en/c4-train.00000-of-01024.json.gz"},
+                split="train",
+            )
+            valdata = load_dataset(
+                "allenai/c4",
+                "allenai--c4",
+                data_files={"validation": "en/c4-validation.00000-of-00008.json.gz"},
+                split="validation",
+            )
         except:
-            traindata = load_dataset('allenai/c4', data_files={'train': 'en/c4-train.00000-of-01024.json.gz'}, split='train')
-            valdata = load_dataset('allenai/c4', data_files={'validation': 'en/c4-validation.00000-of-00008.json.gz'}, split='validation')
-        
+            traindata = load_dataset(
+                "allenai/c4",
+                data_files={"train": "en/c4-train.00000-of-01024.json.gz"},
+                split="train",
+            )
+            valdata = load_dataset(
+                "allenai/c4",
+                data_files={"validation": "en/c4-validation.00000-of-00008.json.gz"},
+                split="validation",
+            )
+
         traindata.save_to_disk(f"data/c4-train.pt")
         valdata.save_to_disk(f"data/c4-val.pt")
 
@@ -93,7 +116,7 @@ def get_c4(nsamples, seed, seqlen, tokenizer):
     for _ in progress_bar:
         while True:
             i = random.randint(0, len(traindata) - 1)
-            trainenc = tokenizer(traindata[i]['text'], return_tensors='pt')
+            trainenc = tokenizer(traindata[i]["text"], return_tensors="pt")
             if trainenc.input_ids.shape[1] > seqlen:
                 break
         i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
@@ -105,10 +128,11 @@ def get_c4(nsamples, seed, seqlen, tokenizer):
         progress_bar.set_description("Generating Samples")
 
     # Prepare validation dataset
-    valenc = tokenizer(' '.join(valdata[:1100]['text']), return_tensors='pt')
-    valenc = valenc.input_ids[:, :(256 * seqlen)]
+    valenc = tokenizer(" ".join(valdata[:1100]["text"]), return_tensors="pt")
+    valenc = valenc.input_ids[:, : (256 * seqlen)]
     valenc = TokenizerWrapper(valenc)
     return trainloader, valenc
+
 
 def get_openwebtext(seed, seqlen, tokenizer):
     """
@@ -128,13 +152,14 @@ def get_openwebtext(seed, seqlen, tokenizer):
     print("Loading OpenWebText dataset.")
     raw_datasets = load_dataset("openwebtext")
     raw_datasets = raw_datasets["train"].train_test_split(
-        test_size=0.05, seed=seed,
-        shuffle=True  # Otherwise test will be at the end of the dataset
-        )
+        test_size=0.05,
+        seed=seed,
+        shuffle=True,  # Otherwise test will be at the end of the dataset
+    )
     trainloader = None
-    valdata = raw_datasets['test']
-    valenc = tokenizer(' '.join(valdata[:1100]['text']), return_tensors='pt')
-    valenc = valenc.input_ids[:, :(256 * seqlen)]
+    valdata = raw_datasets["test"]
+    valenc = tokenizer(" ".join(valdata[:1100]["text"]), return_tensors="pt")
+    valenc = valenc.input_ids[:, : (256 * seqlen)]
     valenc = TokenizerWrapper(valenc)
     return trainloader, valenc
 
@@ -157,9 +182,8 @@ def get_slimpajama(nsamples, seed, seqlen, tokenizer):
     traindata = load_dataset("DKYoon/SlimPajama-6B", split="train")
     testdata = load_dataset("DKYoon/SlimPajama-6B", split="test")
 
-
     # Encode datasets
-    testenc = tokenizer("\n\n".join(testdata['text']), return_tensors='pt')
+    testenc = tokenizer("\n\n".join(testdata["text"]), return_tensors="pt")
 
     # Generate samples from training set
     random.seed(seed)
@@ -168,7 +192,7 @@ def get_slimpajama(nsamples, seed, seqlen, tokenizer):
     for _ in progress_bar:
         while True:
             i = random.randint(0, len(traindata) - 1)
-            trainenc = tokenizer(traindata[i]['text'], return_tensors='pt')
+            trainenc = tokenizer(traindata[i]["text"], return_tensors="pt")
             if trainenc.input_ids.shape[1] > seqlen:
                 break
         i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
@@ -181,13 +205,14 @@ def get_slimpajama(nsamples, seed, seqlen, tokenizer):
 
     return trainloader, testenc
 
+
 # Function to select the appropriate loader based on dataset name
 def get_loaders(
-        name,
-        nsamples=128,
-        seed=0,
-        seqlen=2048,
-        tokenizer=None,
+    name,
+    nsamples=128,
+    seed=0,
+    seqlen=2048,
+    tokenizer=None,
 ):
     """
     Get loaders for the specified dataset
@@ -204,7 +229,7 @@ def get_loaders(
         trainloader: list, The list of training samples
         testenc: TokenizerWrapper, The tokenized test dataset
     """
-    if 'wikitext2' in name.lower():
+    if "wikitext2" in name.lower():
         return get_wikitext2(seed, tokenizer)
     elif "c4" in name.lower():
         return get_c4(nsamples, seed, seqlen, tokenizer)
@@ -224,8 +249,15 @@ if __name__ == "__main__":
         results = lm_eval.simple_evaluate(
             model="hf",
             model_args=f"pretrained=facebook/opt-125m,dtype=half,device=cpu",
-            tasks=["mmlu", "piqa", "arc_easy", "arc_challenge", "winogrande", "openbookqa"],
-            verbosity="ERROR"
+            tasks=[
+                "mmlu",
+                "piqa",
+                "arc_easy",
+                "arc_challenge",
+                "winogrande",
+                "openbookqa",
+            ],
+            verbosity="ERROR",
         )
     except:
         pass
@@ -233,8 +265,8 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
     for name in ["wikitext2", "c4", "openwebtext", "slimpajama"]:
         try:
-            trainloader, testenc = get_loaders(name, nsamples=128, seqlen=1024, tokenizer=tokenizer)
+            trainloader, testenc = get_loaders(
+                name, nsamples=128, seqlen=1024, tokenizer=tokenizer
+            )
         except:
             pass
-    
-

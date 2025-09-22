@@ -10,11 +10,11 @@ import tqdm.auto as tqdm
 
 # Function to evaluate perplexity (ppl) on a specified model and tokenizer
 def eval_ppl(
-        model,
-        tokenizer,
-        eval_dataset,
-        eval_batch_size,
-     ):
+    model,
+    tokenizer,
+    eval_dataset,
+    eval_batch_size,
+):
     """
     Evaluate the perplexity of a model on a dataset.
 
@@ -35,7 +35,10 @@ def eval_ppl(
 
     # Get the test loader
     _, testloader = get_loaders(
-        dataset, seed=0, seqlen=model.config.max_position_embeddings, tokenizer=tokenizer
+        dataset,
+        seed=0,
+        seqlen=model.config.max_position_embeddings,
+        tokenizer=tokenizer,
     )
 
     # Evaluate perplexity in no grad context to avoid updating the model
@@ -51,10 +54,10 @@ def eval_ppl(
 
 @torch.no_grad()
 def eval_ppl_wikitext(
-        model,
-        testenc,
-        bs=1,
-        device=None,
+    model,
+    testenc,
+    bs=1,
+    device=None,
 ):
     """
     Evaluate the perplexity of a model on WikiText2.
@@ -84,11 +87,16 @@ def eval_ppl_wikitext(
         for i in progress_bar:
 
             # Calculate end index
-            j = min(i+bs, nsamples)
+            j = min(i + bs, nsamples)
 
             # Prepare inputs and move to device
-            inputs = testenc[:, (i * model.config.max_position_embeddings):(j * model.config.max_position_embeddings)].to(device)
-            inputs = inputs.reshape(j-i, model.config.max_position_embeddings)
+            inputs = testenc[
+                :,
+                (i * model.config.max_position_embeddings) : (
+                    j * model.config.max_position_embeddings
+                ),
+            ].to(device)
+            inputs = inputs.reshape(j - i, model.config.max_position_embeddings)
 
             # Forward pass through the model
             lm_logits = model(inputs).logits
@@ -99,18 +107,26 @@ def eval_ppl_wikitext(
 
             # Compute loss
             loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(shift_logits.reshape(-1, shift_logits.size(-1)), shift_labels.reshape(-1))
+            loss = loss_fct(
+                shift_logits.reshape(-1, shift_logits.size(-1)),
+                shift_labels.reshape(-1),
+            )
 
             # Calculate negative log likelihood
-            neg_log_likelihood = loss.float() * model.config.max_position_embeddings * (j-i)
+            neg_log_likelihood = (
+                loss.float() * model.config.max_position_embeddings * (j - i)
+            )
 
             # Append to list of negative log likelihoods
             nlls.append(neg_log_likelihood)
 
-            progress_bar.set_description(f"Perplexity: {(torch.exp(torch.stack(nlls).sum() / (i * model.config.max_position_embeddings)).item()):.2f}")
+            progress_bar.set_description(
+                f"Perplexity: {(torch.exp(torch.stack(nlls).sum() / (i * model.config.max_position_embeddings)).item()):.2f}"
+            )
 
         # Compute perplexity
-        ppl = torch.exp(torch.stack(nlls).sum() / (nsamples * model.config.max_position_embeddings))
-
+        ppl = torch.exp(
+            torch.stack(nlls).sum() / (nsamples * model.config.max_position_embeddings)
+        )
 
     return ppl.item()

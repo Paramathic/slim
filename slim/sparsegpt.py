@@ -29,7 +29,9 @@ class SparseGPT:
         if len(inp.shape) == 2:
             inp = inp.unsqueeze(0)
         tmp = inp.shape[0]
-        if isinstance(self.layer, nn.Linear) or isinstance(self.layer, transformers.Conv1D):
+        if isinstance(self.layer, nn.Linear) or isinstance(
+            self.layer, transformers.Conv1D
+        ):
             if len(inp.shape) == 3:
                 inp = inp.reshape((-1, inp.shape[-1]))
             inp = inp.t()
@@ -38,9 +40,7 @@ class SparseGPT:
         inp = math.sqrt(2 / self.nsamples) * inp.float()
         self.H += inp.matmul(inp.t())
 
-    def fasterprune(
-        self, sparsity, prune_n=0, prune_m=0, blocksize=128, percdamp=.01
-    ):
+    def fasterprune(self, sparsity, prune_n=0, prune_m=0, blocksize=128, percdamp=0.01):
         W = self.layer.weight.data.clone()
         if isinstance(self.layer, nn.Conv2d):
             W = W.flatten(1)
@@ -48,7 +48,7 @@ class SparseGPT:
             W = W.t()
         W = W.float()
 
-        if hasattr(self, 'quantizer'):
+        if hasattr(self, "quantizer"):
             if not self.quantizer.ready():
                 self.quantizer.find_params(W, weight=True)
 
@@ -86,7 +86,7 @@ class SparseGPT:
                 if mask is not None:
                     mask1 = mask[:, i1:i2]
                 else:
-                    tmp = W1 ** 2 / (torch.diag(Hinv1).reshape((1, -1))) ** 2
+                    tmp = W1**2 / (torch.diag(Hinv1).reshape((1, -1))) ** 2
                     thresh = torch.sort(tmp.flatten())[0][int(tmp.numel() * sparsity)]
                     mask1 = tmp <= thresh
             else:
@@ -97,19 +97,27 @@ class SparseGPT:
                 d = Hinv1[i, i]
 
                 if prune_n != 0 and i % prune_m == 0:
-                    tmp = W1[:, i:(i + prune_m)] ** 2 / (torch.diag(Hinv1)[i:(i + prune_m)].reshape((1, -1))) ** 2
-                    mask1.scatter_(1, i + torch.topk(tmp, prune_n, dim=1, largest=False)[1], True)
+                    tmp = (
+                        W1[:, i : (i + prune_m)] ** 2
+                        / (torch.diag(Hinv1)[i : (i + prune_m)].reshape((1, -1))) ** 2
+                    )
+                    mask1.scatter_(
+                        1, i + torch.topk(tmp, prune_n, dim=1, largest=False)[1], True
+                    )
 
                 q = w.clone()
                 q[mask1[:, i]] = 0
 
-                if hasattr(self, 'quantizer'):
+                if hasattr(self, "quantizer"):
                     q = quantize(
-                        q.unsqueeze(1), self.quantizer.scale, self.quantizer.zero, self.quantizer.maxq
+                        q.unsqueeze(1),
+                        self.quantizer.scale,
+                        self.quantizer.zero,
+                        self.quantizer.maxq,
                     ).flatten()
 
                 Q1[:, i] = q
-                Losses1[:, i] = (w - q) ** 2 / d ** 2
+                Losses1[:, i] = (w - q) ** 2 / d**2
 
                 err1 = (w - q) / d
                 W1[:, i:] -= err1.unsqueeze(1).matmul(Hinv1[i, i:].unsqueeze(0))
@@ -123,7 +131,9 @@ class SparseGPT:
         torch.cuda.synchronize()
         if isinstance(self.layer, transformers.Conv1D):
             W = W.t()
-        self.layer.weight.data = W.reshape(self.layer.weight.shape).to(self.layer.weight.data.dtype)
+        self.layer.weight.data = W.reshape(self.layer.weight.shape).to(
+            self.layer.weight.data.dtype
+        )
 
     def free(self):
         self.H = None
@@ -134,21 +144,27 @@ def quantize(x, scale, zero, maxq):
     q = torch.clamp(torch.round(x / scale) + zero, 0, maxq)
     return scale * (q - zero)
 
+
 class Quantizer(nn.Module):
 
     def __init__(self, shape=1):
         super(Quantizer, self).__init__()
-        self.register_buffer('maxq', torch.tensor(0))
-        self.register_buffer('scale', torch.zeros(shape))
-        self.register_buffer('zero', torch.zeros(shape))
+        self.register_buffer("maxq", torch.tensor(0))
+        self.register_buffer("scale", torch.zeros(shape))
+        self.register_buffer("zero", torch.zeros(shape))
 
     def configure(
-            self,
-            bits, perchannel=False, sym=True,
-            mse=False, norm=2.4, grid=100, maxshrink=.8,
-            grouprows=1
-        ):
-        self.maxq = torch.tensor(2 ** bits - 1)
+        self,
+        bits,
+        perchannel=False,
+        sym=True,
+        mse=False,
+        norm=2.4,
+        grid=100,
+        maxshrink=0.8,
+        grouprows=1,
+    ):
+        self.maxq = torch.tensor(2**bits - 1)
         self.perchannel = perchannel
         self.sym = sym
         self.mse = mse
@@ -198,7 +214,7 @@ class Quantizer(nn.Module):
             self.zero = torch.round(-xmin / self.scale)
 
         if self.mse:
-            best = torch.full([x.shape[0]], float('inf'), device=dev)
+            best = torch.full([x.shape[0]], float("inf"), device=dev)
             for i in range(int(self.maxshrink * self.grid)):
                 p = 1 - i / self.grid
                 xmin1 = p * xmin

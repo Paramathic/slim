@@ -35,7 +35,7 @@ class WrappedGPT:
         else:
             self.inp_sum += copy.deepcopy(inp.t())
         self.inp_num += 1
-        self.scaler_row *= self.nsamples / (self.nsamples+tmp)
+        self.scaler_row *= self.nsamples / (self.nsamples + tmp)
         self.nsamples += tmp
         inp = inp.type(torch.float32)
-        self.scaler_row += torch.norm(inp, p=2, dim=1) ** 2  / self.nsamples
+        self.scaler_row += torch.norm(inp, p=2, dim=1) ** 2 / self.nsamples

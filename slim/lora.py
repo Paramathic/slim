@@ -4,12 +4,7 @@ import tqdm.auto as tqdm
 from .utils import prune_nm, get_layers_list, find_layers
 
 
-def prune_and_optimize_lora(
-        L,
-        R,
-        num_iters=1000,
-        lr_end_factor=1e-4
-):
+def prune_and_optimize_lora(L, R, num_iters=1000, lr_end_factor=1e-4):
     """
     Prune L in LoRA and optimizer L and R to compensate for the pruning loss.
 
@@ -28,10 +23,16 @@ def prune_and_optimize_lora(
     L[L_mask] = 0
     L_param = torch.nn.Parameter(L.float(), requires_grad=True)
     R_param = torch.nn.Parameter(R.float(), requires_grad=True)
-    optimizer = torch.optim.Adam([L_param, R_param], lr=1e6 / min(L.shape[0], R.shape[1]) ** 2)
-    scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=lr_end_factor, total_iters=num_iters)
+    optimizer = torch.optim.Adam(
+        [L_param, R_param], lr=1e6 / min(L.shape[0], R.shape[1]) ** 2
+    )
+    scheduler = torch.optim.lr_scheduler.LinearLR(
+        optimizer, start_factor=1.0, end_factor=lr_end_factor, total_iters=num_iters
+    )
     progress_bar = tqdm.tqdm(range(num_iters))
-    initial_error = torch.norm(torch.matmul(L, R).float() - target.float()) / target_norm
+    initial_error = (
+        torch.norm(torch.matmul(L, R).float() - target.float()) / target_norm
+    )
     for iter in progress_bar:
         output = torch.matmul(L_param, R_param)
         loss = torch.norm(output - target) / target_norm
@@ -41,11 +42,8 @@ def prune_and_optimize_lora(
         optimizer.zero_grad()
         L_param.data[L_mask] = 0
         progress_bar.set_description(
-            'Iteration {} - Initial Loss: {:.2f} - Current Loss: {:.2f}, LR: {:.2e}'.format(
-                iter + 1,
-                initial_error.item(),
-                loss.item(),
-                scheduler.get_lr()[0]
+            "Iteration {} - Initial Loss: {:.2f} - Current Loss: {:.2f}, LR: {:.2e}".format(
+                iter + 1, initial_error.item(), loss.item(), scheduler.get_lr()[0]
             )
         )
     L.data = L_param.data.to(torch.bfloat16)
@@ -53,12 +51,7 @@ def prune_and_optimize_lora(
     return L_mask
 
 
-def quantize_lora(
-        model,
-        bitwidth=8,
-        lora_tile_size=256,
-        column_wise_grouping=False
-):
+def quantize_lora(model, bitwidth=8, lora_tile_size=256, column_wise_grouping=False):
     """
     Quantize the LoRA matrices in a model.
 
@@ -77,7 +70,7 @@ def quantize_lora(
         num_bits=bitwidth,
         block_quantization=True,
         block_dim=lora_tile_size,
-        column_wise_grouping=column_wise_grouping
+        column_wise_grouping=column_wise_grouping,
     )
     layers = get_layers_list(model)
 
@@ -100,24 +93,27 @@ def quantize_lora(
                 quantizer.quantize_weight(subset[name].lora_right.data.to(device))
             )
 
-            subset[name].lora_left.data = quantized_lora_left.to(subset[name].weight.dtype)
-            subset[name].lora_right.data = quantized_lora_right.to(subset[name].weight.dtype)
+            subset[name].lora_left.data = quantized_lora_left.to(
+                subset[name].weight.dtype
+            )
+            subset[name].lora_right.data = quantized_lora_right.to(
+                subset[name].weight.dtype
+            )
             subset[name].lora_quantizer = quantizer
 
 
-
 def add_lora(
-        module,
-        W_mask,
-        rank_ratio=0.01,
-        slim_lora=False,
-        activations=None,
-        quantizer=None,
-        prune_lora=False,
-        separate_lora=True,
-        lora_tile_size=None,
-        quantize_first=False,
-        scale_important_weights=False
+    module,
+    W_mask,
+    rank_ratio=0.01,
+    slim_lora=False,
+    activations=None,
+    quantizer=None,
+    prune_lora=False,
+    separate_lora=True,
+    lora_tile_size=None,
+    quantize_first=False,
+    scale_important_weights=False,
 ):
     """
     Add low-rank adapters to compensate for the compression loss.
@@ -137,33 +133,42 @@ def add_lora(
         # Get 1% of largest activations
         metric = activations.scaler_row * module.weight.data.abs().sum(dim=0)
         important_weights = metric.topk(
-            int(0.01 * metric.numel()), largest=True, sorted=False)[1]
+            int(0.01 * metric.numel()), largest=True, sorted=False
+        )[1]
     else:
         important_weights = None
     if slim_lora and not any(activations.scaler_row == 0):
         if quantizer is None:
-            W_metric = module.weight.data * (torch.sqrt(activations.scaler_row.reshape((1, -1))))
+            W_metric = module.weight.data * (
+                torch.sqrt(activations.scaler_row.reshape((1, -1)))
+            )
             new_weight = W_metric.clone().detach()
             new_weight[W_mask] = 0
             error_mat = W_metric - new_weight
         else:
-            W_metric = module.weight.data * (torch.sqrt(activations.scaler_row.reshape((1, -1))))
+            W_metric = module.weight.data * (
+                torch.sqrt(activations.scaler_row.reshape((1, -1)))
+            )
             new_weight = module.weight.data
             if quantize_first:
                 new_weight = quantizer.quantize_weight(new_weight, important_weights)
-                new_weight = quantizer.dequantize_absmax(new_weight) * (torch.sqrt(activations.scaler_row.reshape((1, -1))))
-                new_weight[W_mask] = 0            
+                new_weight = quantizer.dequantize_absmax(new_weight) * (
+                    torch.sqrt(activations.scaler_row.reshape((1, -1)))
+                )
+                new_weight[W_mask] = 0
             else:
                 new_weight[W_mask] = 0
                 new_weight = quantizer.quantize_weight(new_weight, important_weights)
-                new_weight = quantizer.dequantize_absmax(new_weight) * (torch.sqrt(activations.scaler_row.reshape((1, -1))))
-            error_mat = (W_metric - new_weight)
+                new_weight = quantizer.dequantize_absmax(new_weight) * (
+                    torch.sqrt(activations.scaler_row.reshape((1, -1)))
+                )
+            error_mat = W_metric - new_weight
     else:
         new_weight = module.weight.data.clone().detach()
         if quantize_first:
             if quantizer is not None:
                 new_weight = quantizer.quantize_weight(new_weight, important_weights)
-                new_weight = quantizer.dequantize_absmax(new_weight)     
+                new_weight = quantizer.dequantize_absmax(new_weight)
             new_weight[W_mask] = 0
         else:
             new_weight[W_mask] = 0
@@ -185,12 +190,19 @@ def add_lora(
         assert rank % tile_dim == 0
 
     if separate_lora:
-        lora_left = (torch.diag_embed(S[:rank]).to(torch.bfloat16) @ V[:, :rank].to(torch.bfloat16).T).t()
+        lora_left = (
+            torch.diag_embed(S[:rank]).to(torch.bfloat16)
+            @ V[:, :rank].to(torch.bfloat16).T
+        ).t()
         lora_right = U[:, :rank].to(torch.bfloat16).t()
         if prune_lora:
             lora_left_mask = prune_and_optimize_lora(lora_left, lora_right)
     else:
-        low_rank_weight = U[:, :rank].to(torch.bfloat16) @ torch.diag_embed(S[:rank]).to(torch.bfloat16) @ V[:, :rank].to(torch.bfloat16).T
+        low_rank_weight = (
+            U[:, :rank].to(torch.bfloat16)
+            @ torch.diag_embed(S[:rank]).to(torch.bfloat16)
+            @ V[:, :rank].to(torch.bfloat16).T
+        )
         if prune_lora:
             raise NotImplementedError
     if slim_lora and not any(activations.scaler_row == 0):
@@ -209,7 +221,9 @@ def add_lora(
 
     if separate_lora:
         module.lora_left = torch.nn.Parameter(lora_left).to(torch.bfloat16).contiguous()
-        module.lora_right = torch.nn.Parameter(lora_right).to(torch.bfloat16).contiguous()
+        module.lora_right = (
+            torch.nn.Parameter(lora_right).to(torch.bfloat16).contiguous()
+        )
         module.weight.data = new_weight.to(torch.bfloat16).contiguous()
         if prune_lora:
             module.lora_left_mask = lora_left_mask

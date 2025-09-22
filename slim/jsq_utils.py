@@ -16,7 +16,9 @@ def clip_matrix(matrix, abs=True, clip_l=0, clip_h=0, channel=False):
 
         if clip_h != 0:
             max_threshold = torch.quantile(matrix_flatten.double(), q=1 - clip_h, dim=0)
-        clipped_matrix = torch.clamp(torch.t(matrix[0]), min=-max_threshold, max=max_threshold)
+        clipped_matrix = torch.clamp(
+            torch.t(matrix[0]), min=-max_threshold, max=max_threshold
+        )
         return torch.t(clipped_matrix).unsqueeze(0).half()
     else:
         num_elements = matrix.numel()
@@ -54,7 +56,7 @@ def generate_ss(activation, weight):
         out = activation @ (w.t())
         max_values, _ = torch.max(out, dim=0)
         min_values, _ = torch.min(out, dim=0)
-        row_ss = (max_values - min_values)
+        row_ss = max_values - min_values
         ss[:, i] = row_ss
     ss = torch.where(torch.isinf(ss), torch.tensor(100, device=ss.device), ss)
     return ss
