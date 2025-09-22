@@ -9,11 +9,12 @@ from accelerate.hooks import remove_hook_from_submodules
 from copy import deepcopy
 
 
-def get_llm(model_name,
-            local_files_only=False,
-            hf_token=None,
-            seqlen=2048,
-            ):
+def get_llm(
+    model_name,
+    local_files_only=False,
+    hf_token=None,
+    seqlen=2048,
+):
     """
     Load a model from transformers
     model_name: str, the name of the model to load
@@ -25,8 +26,8 @@ def get_llm(model_name,
     lm_eval_model = lm_eval.api.registry.get_model("hf").create_from_arg_string(
         model_args,
         {
-            "parallelize": True, 
-            "device": None, # We load the model to GPU for proper inference through LM-Eval
+            "parallelize": True,
+            "device": None,  # We load the model to GPU for proper inference through LM-Eval
         },
     )
     # We load the model back to CPU for pruning and other manipulations
@@ -40,11 +41,7 @@ def get_llm(model_name,
     return model, lm_eval_model
 
 
-def add_empty_lora(
-        model,
-        lora_tile_size=None,
-        lora_rank=0.01
-):
+def add_empty_lora(model, lora_tile_size=None, lora_rank=0.01):
     layer_list = get_layers_list(model)
     lora_hooks = []
     for i in range(len(layer_list)):
@@ -59,19 +56,32 @@ def add_empty_lora(
                     layer_rank = layer_rank + (tile_dim - residue)
                 assert layer_rank % tile_dim == 0
             subset[name].lora_left = torch.nn.Parameter(
-                torch.zeros((subset[name].weight.shape[1], layer_rank), device=subset[name].weight.device).half())
+                torch.zeros(
+                    (subset[name].weight.shape[1], layer_rank),
+                    device=subset[name].weight.device,
+                ).half()
+            )
             subset[name].lora_right = torch.nn.Parameter(
-                torch.zeros((layer_rank, subset[name].weight.shape[0]), device=subset[name].weight.device).half())
+                torch.zeros(
+                    (layer_rank, subset[name].weight.shape[0]),
+                    device=subset[name].weight.device,
+                ).half()
+            )
 
             def add_lora_hook(module, input, output):
                 output += torch.matmul(
-                    torch.matmul(input[0].to(module.lora_left.dtype) / torch.sqrt(module.lora_rank), module.lora_left),
-                    module.lora_right) / torch.sqrt(module.lora_rank)
+                    torch.matmul(
+                        input[0].to(module.lora_left.dtype)
+                        / torch.sqrt(module.lora_rank),
+                        module.lora_left,
+                    ),
+                    module.lora_right,
+                ) / torch.sqrt(module.lora_rank)
 
             subset[name].lora_rank = torch.tensor(layer_rank)
-            
+
             lora_hooks.append(subset[name].register_forward_hook(add_lora_hook))
-            
+
     return lora_hooks
 
 
@@ -80,6 +90,7 @@ def contigous_model(model):
         for param in layer.parameters():
             param.data = param.data.contiguous()
     return model
+
 
 def get_gpu_info_torch():
     if not torch.cuda.is_available():
@@ -120,7 +131,7 @@ def distribute_model(model, activation_buffer_percentage=0.30):
             if device == "cpu":
                 continue
             mem = max_memory[device]
-            mem = re.sub(r'[^0-9.]', '', mem)
+            mem = re.sub(r"[^0-9.]", "", mem)
             mem = float(mem) * 1024**3
             mem = int(mem * (1 - activation_buffer_percentage))
             max_memory[device] = f"{mem // 1e9}GB"
@@ -129,46 +140,52 @@ def distribute_model(model, activation_buffer_percentage=0.30):
         device_map = infer_auto_device_map(
             model,
             max_memory=max_memory,
-            no_split_module_classes=[str(type(layer_list[0])).split('.')[-1]],
+            no_split_module_classes=[str(type(layer_list[0])).split(".")[-1]],
         )
-    if any(d == 'meta' for d in device_map.values()):
-        raise ValueError("Device map contains 'meta'. This shouldn't happen if model is already on CPU.")
+    if any(d == "meta" for d in device_map.values()):
+        raise ValueError(
+            "Device map contains 'meta'. This shouldn't happen if model is already on CPU."
+        )
     model = dispatch_model(model, device_map=device_map)
     return model
-
 
 
 if __name__ == "__main__":
     from transformers import AutoTokenizer
 
-    token = "TOKEN"
+    token = "HF_TOKEN"
 
     def load_model_and_tokenizer(model_name):
         print("Loading model", model_name)
         get_llm(model_name, hf_token=token)
         AutoTokenizer.from_pretrained(model_name, token=token)
 
-    #Load OPT models
+    # Load OPT models
     for size in ["13b"]:
         model_name = f"facebook/opt-{size}"
         load_model_and_tokenizer(model_name)
 
-    #Load LLaMA-2 models
-    for size in ["7b", "13b", "70b"]:
+    # Load LLaMA-2 models
+    for size in ["70b"]:
         model_name = f"meta-llama/Llama-2-{size}-hf"
         load_model_and_tokenizer(model_name)
 
-    #Load LLaMA-3.1 models
-    for size in ["8B", "70B"]:
+    # Load LLaMA-3.1 models
+    for size in ["8B"]:
         model_name = f"meta-llama/Llama-3.1-{size}"
         load_model_and_tokenizer(model_name)
 
-    #Load LLaMA-3.2 models
+    # Load LLaMA-3.2 models
     for size in ["1B", "3B"]:
         model_name = f"meta-llama/Llama-3.2-{size}"
         load_model_and_tokenizer(model_name)
 
-    #Load Gemma-3 models
+    # Load Gemma-3 models
     for size in ["12b", "27b"]:
         model_name = f"google/gemma-3-{size}-pt"
+        load_model_and_tokenizer(model_name)
+
+    # Load Qwen-2.5 models
+    for size in ["0.5B"]:
+        model_name = f"Qwen/Qwen2.5-{size}"
         load_model_and_tokenizer(model_name)

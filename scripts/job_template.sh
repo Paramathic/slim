@@ -38,6 +38,12 @@ ARG_WANDB="${30:-'true'}"
 ARG_HF_TOKEN="${31:-""}"
 ARG_SAVE_CHECKPOINT_PATH="${32:-'checkpoints/${ARG_MODEL_NAME}_${ARG_METHOD}_${ARG_STRUCTURE}_lr${ARG_LORA_RANK}_sparsity${ARG_SPARSITY_RATIO}'}"
 ARG_OUTPUT_CSV_FILE="${33:-'results/results.csv'}"
+ARG_PARALLELISM="${34:-'data_parallel'}"
+ARG_FINETUNE_TOKEN_COUNT="${35:-300000}"
+ARG_WEIGHT_DECAY="${36:-1e-2}"
+ARG_FINE_TUNING_GLOBAL_BATCH_SIZE="${37:-128}"
+ARG_LEARNING_RATE="${38:-1e-5}"
+ARG_CLUSTER="${39:-'trillium'}" # 'trillium' or 'narval'
 
 
 SCRIPT_TO_RUN=scripts/run_slim_args.sh
@@ -52,42 +58,65 @@ mkdir -p "$HF_HOME"
 
 USERNAME=$(whoami)
 
+COPY_DATA=false
 
-# --- Data and Container Preparation ---
-if [ "$ARG_COPY_DATA" = true ]; then
-    echo "Copying data to SLURM_TMPDIR..."
-    DATA_DIR_SRC="/home/${USERNAME}/projects/def-mmehride/${USERNAME}/data"
-    DATA_DIR_TMP="$SLURM_TMPDIR/data"
-    cp -r "$DATA_DIR_SRC" "$SLURM_TMPDIR/"
-    echo "Data copied to $DATA_DIR_TMP"
+
+module load apptainer 
+export HF_DATASETS_TRUST_REMOTE_CODE="1"
+export HF_HOME="$SLURM_TMPDIR/data" 
+export MASTER_PORT=29501
+export OMP_NUM_THREADS=12
+
+mkdir -p "$HF_HOME"
+
+USERNAME=$(whoami)
+
+
+if [ "$ARG_CLUSTER" = "trillium" ]; then
+    echo "Running on Trillium cluster"
+    CONTAINER_NAME=torch-jax
+    DATA_DIR_SRC="${SCRATCH}/data"
+    # Additional setup for Trillium can go here
+    SINGULARITY_CMD="singularity exec \
+        --fakeroot \
+        --bind $DATA_DIR_SRC:$PWD/data \
+        --bind $SCRATCH/tiled_models:$PWD/tiled_models \
+        --nv ${SCRATCH}/$CONTAINER_NAME.sif "
+elif [ "$ARG_CLUSTER" = "narval" ]; then
+    echo "Running on Narval cluster"
+    # --- Data and Container Preparation ---
+    if [ "$ARG_COPY_DATA" = true ]; then
+        echo "Copying data to SLURM_TMPDIR..."
+        DATA_DIR_SRC="/home/${USERNAME}/projects/def-mmehride/${USERNAME}/data"
+        DATA_DIR_TMP="$SLURM_TMPDIR/data"
+        cp -r "$DATA_DIR_SRC" "$SLURM_TMPDIR/"
+        echo "Data copied to $DATA_DIR_TMP"
+        CONTAINER_NAME=torch-one-shot
+
+        SINGULARITY_CMD="singularity exec \
+            --bind $PWD:/home/${USERNAME} \
+            --bind $SLURM_TMPDIR:/tmp \
+            --bind $DATA_DIR_TMP:/home/${USERNAME}/data \
+            --nv ${SLURM_TMPDIR}/$CONTAINER_NAME.sif "
+    else
+        echo "Skipping data copy as per user request."
+        DATA_DIR_TMP="/home/${USERNAME}/projects/def-mmehride/${USERNAME}/data" # Use the original data directory
+    fi
+    echo "Preparing container..."
+    rm -rf $SLURM_TMPDIR/torch-one-shot.sif;
+    mkdir ${SLURM_TMPDIR}/torch-one-shot.sif;
+    tar -xf /home/${USERNAME}/projects/def-mmehride/${USERNAME}/torch-one-shot.tar -C $SLURM_TMPDIR;
+    mkdir ${SLURM_TMPDIR}/torch-one-shot.sif/etc/pki;
+    mkdir ${SLURM_TMPDIR}/torch-one-shot.sif/etc/pki/tls;
+    mkdir ${SLURM_TMPDIR}/torch-one-shot.sif/etc/pki/tls/certs;
+    cp /etc/ssl/certs/ca-bundle.crt ${SLURM_TMPDIR}/torch-one-shot.sif/etc/pki/tls/certs/ca-bundle.crt;
 else
-    echo "Skipping data copy as per user request."
-    DATA_DIR_TMP="/home/${USERNAME}/projects/def-mmehride/${USERNAME}/data" # Use the original data directory
+    echo "Unknown cluster specified: $ARG_CLUSTER. Exiting."
+    exit 1
 fi
-
-echo "Preparing container..."
-rm -rf $SLURM_TMPDIR/torch-one-shot.sif;
-mkdir ${SLURM_TMPDIR}/torch-one-shot.sif;
-tar -xf /home/${USERNAME}/projects/def-mmehride/${USERNAME}/torch-one-shot.tar -C $SLURM_TMPDIR;
-mkdir ${SLURM_TMPDIR}/torch-one-shot.sif/etc/pki;
-mkdir ${SLURM_TMPDIR}/torch-one-shot.sif/etc/pki/tls;
-mkdir ${SLURM_TMPDIR}/torch-one-shot.sif/etc/pki/tls/certs;
-cp /etc/ssl/certs/ca-bundle.crt ${SLURM_TMPDIR}/torch-one-shot.sif/etc/pki/tls/certs/ca-bundle.crt;
-
-# --- Execute inside Singularity ---
-echo "Executing run_experiment.sh inside Singularity..."
-singularity exec \
-    --bind $PWD:/home/${USERNAME} \
-    --bind $SLURM_TMPDIR:/tmp \
-    --nv \
-    ${SLURM_TMPDIR}/torch-one-shot.sif \
-    mkdir -p /home/${USERNAME}/data
     
-singularity exec \
-    --bind $PWD:/home/${USERNAME} \
-    --bind $SLURM_TMPDIR:/tmp \
-    --bind $DATA_DIR_TMP:/home/${USERNAME}/data \
-    --nv ${SLURM_TMPDIR}/torch-one-shot.sif \
+    
+bash ${SINGULARITY_CMD} \
     bash "${SCRIPT_TO_RUN}" \
     "${ARG_MODEL_NAME}" \
     "${ARG_STRUCTURE}" \
@@ -121,7 +150,12 @@ singularity exec \
     "${ARG_WANDB}" \
     "${ARG_HF_TOKEN}" \
     "${ARG_SAVE_CHECKPOINT_PATH}" \
-    "${ARG_OUTPUT_CSV_FILE}"
+    "${ARG_OUTPUT_CSV_FILE}" \
+    "${ARG_PARALLELISM}" \
+    "${ARG_FINETUNE_TOKEN_COUNT}" \
+    "${ARG_WEIGHT_DECAY}" \
+    "${ARG_FINE_TUNING_GLOBAL_BATCH_SIZE}" \
+    "${ARG_LEARNING_RATE}"
 
 echo $ARG_WANDB
 

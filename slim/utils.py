@@ -32,13 +32,13 @@ def check_sparsity(model):
     return float(count) / total_params
 
 
-def report_gpu_memory(message=""):
+def report_gpu_memory(message="", device=0):
     """
     Report the allocated memory on the GPU in GB.
     message: str, a message to print before the memory report
     """
     torch.cuda.empty_cache()
-    print(message, f" - Allocated Memory: {(torch.cuda.memory_allocated() / 1024 / 1024 / 1024):.2f}GB")
+    print(message, f" - Allocated Memory: {(torch.cuda.memory_allocated(device) / 1024 / 1024 / 1024):.2f}GB")
 
 
 def get_layers_list(model):

@@ -133,10 +133,6 @@ def prune_magnitude(
                 quantized_weight = quantizer.quantize_weight(subset[name].weight.data)
                 subset[name].weight.data = quantizer.dequantize_absmax(quantized_weight).to(torch.bfloat16)
                 subset[name].register_buffer("quantization_scaling_factor", quantizer.scaling_factor)
-                if not tiled_weight_quantization:
-                    subset[name].scaling_factor = quantizer.scaling_factor
-                else:
-                    subset[name].scaling_factor = None
         layer = layer.cpu()
 
 def prune_wanda(
@@ -291,10 +287,6 @@ def prune_wanda(
 
                 if quantizer is not None:
                     subset[name].register_buffer("quantization_scaling_factor", quantizer.scaling_factor)
-                    if not tiled_weight_quantization:
-                        subset[name].scaling_factor = quantizer.scaling_factor
-                    else:
-                        subset[name].scaling_factor = None
 
                 if separate_lora:
                     def add_lora_hook(module, input, output):
@@ -338,10 +330,6 @@ def prune_wanda(
                         subset[name].weight.data = quantizer.dequantize_absmax(quantized_weight).to(torch.bfloat16)
                         if quantizer is not None:
                             subset[name].register_buffer("quantization_scaling_factor", quantizer.scaling_factor)
-                            if not tiled_weight_quantization:
-                                subset[name].scaling_factor = quantizer.scaling_factor
-                            else:
-                                subset[name].scaling_factor = None
                     subset[name].weight.data[W_mask] = 0  ## set weights to zero
                 else:
                     subset[name].weight.data[W_mask] = 0  ## set weights to zero
@@ -350,10 +338,6 @@ def prune_wanda(
                         subset[name].weight.data = quantizer.dequantize_absmax(quantized_weight).to(torch.bfloat16)
                         if quantizer is not None:
                             subset[name].register_buffer("quantization_scaling_factor", quantizer.scaling_factor)
-                            if not tiled_weight_quantization:
-                                subset[name].scaling_factor = quantizer.scaling_factor
-                            else:
-                                subset[name].scaling_factor = None
 
 
         progress_bar.set_description(f"Layer {i} - Evaluating Output")
@@ -471,10 +455,6 @@ def prune_sparsegpt(
             gpts[name].fasterprune(sparsity_ratio, prune_n=prune_n, prune_m=prune_m, percdamp=0.01, blocksize=weight_tile_size)
             if quantize_weight:
                 subset[name].register_buffer("quantization_scaling_factor", 1. / gpts[name].quantizer.scaling_factor)
-                if not tiled_weight_quantization:
-                    subset[name].scaling_factor = 1. / gpts[name].quantizer.scale[0]
-                else:
-                    subset[name].scaling_factor = None
             gpts[name].free()
 
         progress_bar.set_description(f"Layer {i} - Evaluating Output")
@@ -543,10 +523,6 @@ def quantize_model(
             
             subset[name].weight.data = quantized_weight.to(subset[name].weight.dtype)
             subset[name].register_buffer("quantization_scaling_factor", quantizer.scaling_factor)
-            if not weight_tiled_quantization:
-                subset[name].scaling_factor = quantizer.scaling_factor
-            else:
-                subset[name].scaling_factor = None
         layer = layer.cpu()
 
 
@@ -721,7 +697,6 @@ def joint_pq(
 
                 if quantizer is not None:
                     subset[name].register_buffer("quantization_scaling_factor", quantizer.scaling_factor)
-                    subset[name].scaling_factor = None
 
                 if separate_lora:
                     def add_lora_hook(module, input, output):
@@ -761,7 +736,6 @@ def joint_pq(
                 quantized_weight = quantizer.quantize_weight(subset[name].weight.data, important_weights)
                 subset[name].weight.data = quantizer.dequantize_absmax(quantized_weight).to(torch.bfloat16)
                 subset[name].register_buffer("quantization_scaling_factor", quantizer.scaling_factor)
-                subset[name].scaling_factor = None
 
         inps, outs = outs, inps
         layers[i] = layer.cpu()

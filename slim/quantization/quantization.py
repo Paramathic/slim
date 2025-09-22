@@ -315,19 +315,25 @@ class QuantizedMatmul(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, input, weight, quantizer):
+    def forward(ctx, input, weight, quantizer, mask=None, transpose_weight=False):
+        if mask is not None:
+            weight.data[mask] = 0.
         if quantizer is not None:
             quantized_weight = quantizer.quantize_weight(weight.data)
             dequantized_weight = quantizer.dequantize_absmax(quantized_weight)
         else:
             dequantized_weight = weight
-        ctx.save_for_backward(input, dequantized_weight)
+        if transpose_weight:
+            dequantized_weight = dequantized_weight.t()
+        ctx.save_for_backward(input, dequantized_weight, torch.tensor(transpose_weight))
         result = torch.matmul(input, dequantized_weight)
         return result
 
     @staticmethod
     def backward(ctx, grad_output):
-        input, weight = ctx.saved_tensors
+        input, weight, transpose_weight = ctx.saved_tensors
         grad_input = torch.matmul(grad_output, weight.t())
         grad_weight = torch.matmul(input.view(-1, input.shape[-1]).t(), grad_output.view(-1, grad_output.shape[-1]))
-        return grad_input, grad_weight, None
+        if transpose_weight:
+            grad_weight = grad_weight.t()
+        return grad_input, grad_weight, None, None, None

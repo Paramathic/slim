@@ -12,52 +12,101 @@ from transformers import (
 )
 from transformers.testing_utils import CaptureLogger
 from transformers.utils.versions import require_version
+from .quantization.quantization import Quantizer, QuantizedMatmul
+from types import MethodType
+import torch.distributed as dist
+import os
+import wandb
 
 
-def disable_linear_layer_grads(model):
+def sparse_quantized_linear(module, input):
+    output = QuantizedMatmul.apply(
+        input,
+        module.weight,
+        getattr(module, "quantizer", None),
+        getattr(module, "weight_mask", None),
+        True,
+    )
+    if module.bias is not None:
+        output += module.bias
+    return output
+
+
+def disable_linear_layer_grads(model, quantization_bitwidth=4):
     known_modules = {"Linear", "Conv1d"}
     for name, module in model.named_modules():
         module_type = type(module).__name__
         if module_type in known_modules:
-            if hasattr(module, "lora_left"):
+            # skip lm_head
+            if name == "lm_head":
+                module.weight.requires_grad = True
+                print("Skipping lm_head")
+                continue
+            elif hasattr(module, "lora_left"):
                 module.weight.requires_grad = False
                 module.weight.data = module.weight.half()
                 if module.bias is not None:
                     module.bias.data = module.bias.half()
                     module.bias.requires_grad = False
                 if hasattr(module, "lora_left_mask"):
+
                     def mask_lora(self, inputs):
                         self.lora_left.data[self.lora_left_mask] = 0
 
                     module.register_forward_pre_hook(mask_lora)
             else:
-                def mask_weight(self, inputs):
-                    self.weight.data[self.weight_mask] = 0
                 module.weight.requires_grad = True
-                module.weight_mask = (module.weight.data.clone().detach().cpu() == 0)
-                module.register_forward_pre_hook(mask_weight)
-                if hasattr(module, "scaling_factor"):
-                    if module.scaling_factor is None:
-                        raise NotImplementedError("Group quantization is not supported for fine-tuning")
+                module.weight_mask = (module.weight.data.clone().detach() == 0).cuda()
+                if hasattr(module, "quantization_scaling_factor"):
+                    if module.quantization_scaling_factor.dim() == 1:
+                        group_size = -1
+                        column_wise_grouping = False
+                        block_quantization = False
+                    else:
+                        block_quantization = True
+                        if (
+                            module.weight.shape[0]
+                            == module.quantization_scaling_factor.shape[0]
+                        ):
+                            group_size = (
+                                module.weight.shape[1]
+                                // module.quantization_scaling_factor.shape[1]
+                            )
+                            column_wise_grouping = True
+                        else:
+                            group_size = (
+                                module.weight.shape[0]
+                                // module.quantization_scaling_factor.shape[0]
+                            )
+                            column_wise_grouping = False
+                    module.quantizer = Quantizer(
+                        "weight",
+                        num_bits=quantization_bitwidth,
+                        group_size=group_size,
+                        column_wise_grouping=column_wise_grouping,
+                        block_quantization=block_quantization,
+                    )
+                module.forward = MethodType(sparse_quantized_linear, module)
 
 
-def requantize(model, q=4):
-    known_modules = {"Linear", "Conv1d"}
+def reset_forward_pass(model):
     for name, module in model.named_modules():
         module_type = type(module).__name__
-        if module_type in known_modules:
-            if hasattr(module, "lora_left"):
-                pass
-            else:
-                if not hasattr(module, 'scaling_factor'):
-                    pass
-                else:
-                    if module.scaling_factor is None:
-                        raise NotImplementedError("Group quantization is not supported for fine-tuning")
-                    scaling_factor = module.scaling_factor
+        if module_type in {"Linear"}:
+            if not hasattr(module, "lora_left"):
+                if hasattr(module, "quantizer"):
                     weight = module.weight
-                    quantized_weight = torch.round((weight * scaling_factor).float())
-                    module.weight.data = (quantized_weight / scaling_factor).to(module.weight.dtype)
+                    quantized_weight = module.quantizer.quantize_weight(weight.data)
+                    dequantized_weight = module.quantizer.dequantize_absmax(
+                        quantized_weight
+                    )
+                    module.weight.data = dequantized_weight
+                    del module.quantizer
+                if hasattr(module, "weight_mask"):
+                    module.weight.data[module.weight_mask] = 0
+                    del module.weight_mask
+                module.forward = MethodType(torch.nn.Linear.forward, module)
+    torch.cuda.empty_cache()
 
 
 @dataclass
@@ -67,15 +116,23 @@ class DataTrainingArguments:
     """
 
     dataset_name: Optional[str] = field(
-        default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
+        default=None,
+        metadata={"help": "The name of the dataset to use (via the datasets library)."},
     )
     dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
+        default=None,
+        metadata={
+            "help": "The configuration name of the dataset to use (via the datasets library)."
+        },
     )
-    train_file: Optional[str] = field(default=None, metadata={"help": "The input training data file (a text file)."})
+    train_file: Optional[str] = field(
+        default=None, metadata={"help": "The input training data file (a text file)."}
+    )
     validation_file: Optional[str] = field(
         default=None,
-        metadata={"help": "An optional input evaluation data file to evaluate the perplexity on (a text file)."},
+        metadata={
+            "help": "An optional input evaluation data file to evaluate the perplexity on (a text file)."
+        },
     )
     max_train_samples: Optional[int] = field(
         default=None,
@@ -107,7 +164,8 @@ class DataTrainingArguments:
         },
     )
     overwrite_cache: bool = field(
-        default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
+        default=False,
+        metadata={"help": "Overwrite the cached training and evaluation sets"},
     )
     validation_split_percentage: Optional[int] = field(
         default=5,
@@ -120,41 +178,60 @@ class DataTrainingArguments:
         metadata={"help": "The number of processes to use for the preprocessing."},
     )
     keep_linebreaks: bool = field(
-        default=True, metadata={"help": "Whether to keep line breaks when using TXT files or not."}
+        default=True,
+        metadata={"help": "Whether to keep line breaks when using TXT files or not."},
     )
 
     def __post_init__(self):
         if self.streaming:
-            require_version("datasets>=2.0.0", "The streaming feature requires `datasets>=2.0.0`")
+            require_version(
+                "datasets>=2.0.0", "The streaming feature requires `datasets>=2.0.0`"
+            )
 
-        if self.dataset_name is None and self.train_file is None and self.validation_file is None:
-            raise ValueError("Need either a dataset name or a training/validation file.")
+        if (
+            self.dataset_name is None
+            and self.train_file is None
+            and self.validation_file is None
+        ):
+            raise ValueError(
+                "Need either a dataset name or a training/validation file."
+            )
         else:
             if self.train_file is not None:
                 extension = self.train_file.split(".")[-1]
-                assert extension in ["csv", "json", "txt"], "`train_file` should be a csv, a json or a txt file."
+                assert extension in [
+                    "csv",
+                    "json",
+                    "txt",
+                ], "`train_file` should be a csv, a json or a txt file."
             if self.validation_file is not None:
                 extension = self.validation_file.split(".")[-1]
-                assert extension in ["csv", "json", "txt"], "`validation_file` should be a csv, a json or a txt file."
+                assert extension in [
+                    "csv",
+                    "json",
+                    "txt",
+                ], "`validation_file` should be a csv, a json or a txt file."
 
 
 def fine_tune(
-        model,
-        tokenizer,
-        dataset_name="c4",
-        dataset_config_name=None,
-        validation_split_percentage=5,
-        streaming=False,
-        preprocessing_num_workers=None,
-        overwrite_cache=False,
-        block_size=None,
-        max_train_samples=30000,
-        max_eval_samples=128,
-        cache_dir="data",
-        optimizer="adamw_torch",
-        global_batch_size=64,
-        local_batch_size=1,
-        use_wandb=False,
+    model,
+    tokenizer,
+    dataset_name="slimpajama",
+    dataset_config_name=None,
+    validation_split_percentage=5,
+    streaming=False,
+    preprocessing_num_workers=os.cpu_count,
+    overwrite_cache=False,
+    block_size=None,
+    max_train_samples=30000,
+    max_eval_samples=128,
+    optimizer="adamw_torch",
+    global_batch_size=64,
+    local_batch_size=1,
+    use_wandb=False,
+    quantization_bitwidth=4,
+    learning_rate=1e-5,
+    weight_decay=1e-2,
 ):
     """
     Fine-tune a model on a dataset using HuggingFace Trainer. In case of existence of LoRA, the original weights are
@@ -175,7 +252,6 @@ def fine_tune(
             this value if set.
         max_eval_samples: int - For debugging purposes or quicker training, truncate the number of evaluation examples to
             this value if set.
-        cache_dir: str - The directory to store the cache
         optimizer: str - The optimizer to use
         global_batch_size: int - The global batch size for training
         local_batch_size: int - The local batch size to run on the device
@@ -189,10 +265,10 @@ def fine_tune(
         model = model.float()
     else:
         model = model.to(torch.bfloat16)
-    
+
     # Set report_to based on wandb usage
     report_to = "wandb" if use_wandb else "none"
-    
+
     training_args = TrainingArguments(
         output_dir="output",
         overwrite_output_dir=True,
@@ -209,31 +285,44 @@ def fine_tune(
         bf16=bf16,
         fp16=not bf16,
         group_by_length=False,
-        gradient_accumulation_steps=global_batch_size // local_batch_size,
+        gradient_accumulation_steps=(
+            global_batch_size // local_batch_size // dist.get_world_size()
+            if dist.is_initialized()
+            else global_batch_size // local_batch_size
+        ),
         warmup_steps=5,
         optim=optimizer,
         save_strategy="steps",
         report_to=report_to,
         gradient_checkpointing=True,
-        learning_rate=1e-4,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
     )
     ################################################################################################################
-    if os.path.exists(f"{cache_dir}/c4-raw.pt"):
-        raw_datasets = load_from_disk(f"{cache_dir}/c4-raw.pt")
-    else:
+    if dataset_name == "c4":
         try:
-            raw_datasets = load_dataset('allenai/c4',
-                                        'allenai--c4',
-                                        data_files={'train': 'en/c4-train.00000-of-01024.json.gz',
-                                                    'validation': 'en/c4-validation.00000-of-00008.json.gz'},
-                                        cache_dir=cache_dir)
+            raw_datasets = load_dataset(
+                "allenai/c4",
+                "allenai--c4",
+                data_files={
+                    "train": "en/c4-train.00000-of-01024.json.gz",
+                    "validation": "en/c4-validation.00000-of-00008.json.gz",
+                },
+            )
         except:
-            raw_datasets = load_dataset('allenai/c4',
-                                        data_files={'train': 'en/c4-train.00000-of-01024.json.gz',
-                                                    'validation': 'en/c4-validation.00000-of-00008.json.gz'},
-                                        cache_dir=cache_dir)
-
-        raw_datasets.save_to_disk(f"{cache_dir}/c4-raw.pt")
+            raw_datasets = load_dataset(
+                "allenai/c4",
+                data_files={
+                    "train": "en/c4-train.00000-of-01024.json.gz",
+                    "validation": "en/c4-validation.00000-of-00008.json.gz",
+                },
+            )
+    elif dataset_name == "slimpajama":
+        raw_datasets = load_dataset("DKYoon/SlimPajama-6B")
+    else:
+        raise NotImplementedError(
+            "Only c4 and slimpajama datasets are supported for now."
+        )
 
     if "validation" not in raw_datasets.keys():
         raw_datasets["validation"] = load_dataset(
@@ -260,7 +349,6 @@ def fine_tune(
     # Preprocessing the datasets.
     # First we tokenize all the texts.
 
-
     if training_args.do_train:
         column_names = list(raw_datasets["train"].features)
     else:
@@ -268,8 +356,9 @@ def fine_tune(
     text_column_name = "text" if "text" in column_names else column_names[0]
 
     # since this will be pickled to avoid _LazyModule error in Hasher force logger loading before tokenize_function
-    tok_logger = transformers.utils.logging.get_logger("transformers.tokenization_utils_base")
-
+    tok_logger = transformers.utils.logging.get_logger(
+        "transformers.tokenization_utils_base"
+    )
 
     def tokenize_function(examples):
         with CaptureLogger(tok_logger) as cl:
@@ -281,7 +370,6 @@ def fine_tune(
                 " before being passed to the model."
             )
         return output
-
 
     with training_args.main_process_first(desc="Dataset map tokenization"):
         if not streaming:
@@ -328,7 +416,7 @@ def fine_tune(
             total_length = (total_length // block_size) * block_size
         # Split by chunks of max_len.
         result = {
-            k: [t[i: i + block_size] for i in range(0, total_length, block_size)]
+            k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
             for k, t in concatenated_examples.items()
         }
         result["labels"] = result["input_ids"].copy()
@@ -389,7 +477,7 @@ def fine_tune(
             preds = preds[:, :-1].reshape(-1)
             return metric.compute(predictions=preds, references=labels)
 
-    disable_linear_layer_grads(model)
+    disable_linear_layer_grads(model, quantization_bitwidth)
 
     ################################################################################################################
     model.config.use_cache = False
@@ -405,9 +493,9 @@ def fine_tune(
             # Data collator will default to DataCollatorWithPadding, so we change it.
             data_collator=default_data_collator,
             compute_metrics=compute_metrics if training_args.do_eval else None,
-            preprocess_logits_for_metrics=preprocess_logits_for_metrics
-            if training_args.do_eval
-            else None,
+            preprocess_logits_for_metrics=(
+                preprocess_logits_for_metrics if training_args.do_eval else None
+            ),
         )
         train_result = trainer.train()
         metrics = train_result.metrics
@@ -418,14 +506,13 @@ def fine_tune(
         metrics["train_samples"] = min(max_train_samples, len(train_dataset))
 
         trainer.log_metrics("train", metrics)
-        
+
         # Log fine-tuning metrics to wandb if enabled
-        if use_wandb:
-            import wandb
+        if use_wandb and wandb.run is not None:
             # Log training metrics with "finetune_" prefix to distinguish from main metrics
             wandb_metrics = {}
             for key, value in metrics.items():
                 wandb_metrics[f"finetune_{key}"] = value
             wandb.log(wandb_metrics)
 
-    requantize(model)
+    reset_forward_pass(model)

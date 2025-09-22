@@ -7,6 +7,8 @@ export HF_HUB_OFFLINE="1"
 export WANDB_API_KEY="WANDB_API_KEY_PLACEHOLDER"
 export WANDB_MODE="offline"
 
+export TRITON_CACHE_DIR="/tmp"
+
 
 MODEL_NAME="${1:-'meta-llama/Llama-3.2-1B'}"
 STRUCTURE="${2:-'2:4'}"
@@ -41,6 +43,11 @@ WANDB="${30:-'true'}"
 HF_TOKEN="${31:-""}"
 SAVE_CHECKPOINT_PATH="${32:-""}"
 OUTPUT_CSV_FILE="${33:-'results/results.csv'}"
+PARALLELISM="${34:-'data_parallel'}"
+FINETUNE_TOKEN_COUNT="${35:-300000}"
+WEIGHT_DECAY="${36:-1e-2}"
+FINE_TUNING_GLOBAL_BATCH_SIZE="${37:-128}"
+LEARNING_RATE="${38:-1e-5}"
 
 
 if [ "$SLIM_LORA" = "true" ]; then
@@ -145,11 +152,25 @@ else
 fi
 
 
+NUM_GPUS=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
+
+if [ "$PARALLELISM" = "data_parallel" ]; then
+    echo "Using data parallelism with $NUM_GPUS GPUs"
+    STARTER_CMD="torchrun --nproc_per_node=$NUM_GPUS --rdzv_endpoint=localhost:29500"
+elif [ "$PARALLELISM" = "model_parallel" ]; then
+    echo "Using model parallelism"
+    STARTER_CMD="accelerate launch --num_processes=1 --mixed_precision=bf16"
+else
+    echo "Unknown parallelism type: $PARALLELISM. Defaulting to data parallelism."
+    STARTER_CMD="torchrun --nproc_per_node=$NUM_GPUS --rdzv_endpoint=localhost:29500"
+fi
+
+
 SHIFT_ZERO_METRICS='--shift_zero_metrics'
 EVAL_BATCH_SIZE=1
 
 
-python main.py \
+$STARTER_CMD main.py \
     --model $MODEL_NAME \
     --prune_method $METHOD \
     --sparsity_ratio $SPARSITY_RATIO \
@@ -184,4 +205,8 @@ python main.py \
     $SCALE_IMPORTANT_WEIGHTS \
     $MASKLLM_CHECKPOINT \
     $WANDB \
-    $SAVE_CHECKPOINT_PATH 
+    $SAVE_CHECKPOINT_PATH \
+    --learning_rate $LEARNING_RATE \
+    --finetune_token_count $FINETUNE_TOKEN_COUNT \
+    --weight_decay $WEIGHT_DECAY \
+    --fine_tuning_global_batch_size $FINE_TUNING_GLOBAL_BATCH_SIZE

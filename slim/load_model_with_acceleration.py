@@ -34,12 +34,13 @@ from slim.eval import eval_ppl_wikitext
 from slim.data import get_wikitext2
 
 
-def load_compressed_model(model_path):
+def load_compressed_model(model_path, device_map):
     """
     Load a compressed model from the specified path.
 
     Args:
         model_path (str): The path to the model directory.
+        device_map (str or dict, optional): Device map for loading the model. Defaults to 'auto'.
 
     Returns:
         tuple: A tuple containing the model, tokenizer, configuration dictionary, and LoRA hooks.
@@ -63,7 +64,7 @@ def load_compressed_model(model_path):
     model = AutoModelForCausalLM.from_pretrained(
         args['model'], 
         torch_dtype=torch.bfloat16,
-        device_map='auto'
+        device_map=device_map,
     )
     
     # Determine if we need LoRA (simple check: lora_rank > 0)
@@ -83,11 +84,14 @@ def load_compressed_model(model_path):
     final_state_dict = {}
     
     # Use model.safetensors.index.json to figure out the filenames
-    with open(os.path.join(model_path, 'model.safetensors.index.json')) as f:
-        index_data = json.load(f)
-        filenames = set()
-        for file in index_data['weight_map'].values():
-            filenames.add(file)
+    try:
+        with open(os.path.join(model_path, 'model.safetensors.index.json')) as f:
+            index_data = json.load(f)
+            filenames = set()
+            for file in index_data['weight_map'].values():
+                filenames.add(file)
+    except FileNotFoundError:
+        filenames= {'model.safetensors'}
     
     files = list(filenames)
     for file in (pbar := tqdm(files, desc="Loading state dict files")):
