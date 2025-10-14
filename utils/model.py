@@ -1,12 +1,15 @@
 from slim.utils import get_layers_list, find_layers
 import torch
-import lm_eval
-import subprocess
+from lm_eval.api import registry
+from lm_eval.models.huggingface import HFLM
 import re
 import psutil
 from accelerate import infer_auto_device_map, dispatch_model
 from accelerate.hooks import remove_hook_from_submodules
 from copy import deepcopy
+
+
+registry.MODEL_REGISTRY["hf"] = HFLM
 
 
 def get_llm(
@@ -23,11 +26,12 @@ def get_llm(
     seqlen: int, the maximum sequence length to use
     """
     model_args = f"pretrained={model_name},dtype=half,local_files_only={local_files_only},low_cpu_mem_usage=True,token={hf_token}"
-    lm_eval_model = lm_eval.api.registry.get_model("hf").create_from_arg_string(
+    lm_eval_model = registry.get_model("hf").create_from_arg_string(
         model_args,
         {
             "parallelize": True,
             "device": None,  # We load the model to GPU for proper inference through LM-Eval
+            "batch_size": "auto",
         },
     )
     # We load the model back to CPU for pruning and other manipulations
