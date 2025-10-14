@@ -410,7 +410,14 @@ def main():
         if args.test_lmharness:
             results = lm_eval.simple_evaluate(
                 model=lm_eval_model,
-                tasks=["mmlu", "piqa", "arc_easy", "arc_challenge", "winogrande"],
+                tasks=[
+                    "mmlu",
+                    "piqa",
+                    "arc_easy",
+                    "arc_challenge",
+                    "winogrande",
+                    "openbookqa",
+                ],
                 verbosity="ERROR",
             )
             lmharness_results["mmlu"] = results["results"]["mmlu"]["acc,none"]
