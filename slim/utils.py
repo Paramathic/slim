@@ -7,7 +7,7 @@ def check_sparsity(model):
     Check the end-to-end sparsity ratio of a model.
     model: torch.nn.Module - The model to check
     """
-    use_cache = model.config.use_cache
+    use_cache = getattr(model.config, "use_cache", False)
     model.config.use_cache = False
 
     layers = get_layers_list(model)
@@ -51,15 +51,18 @@ def get_layers_list(model):
     model: nn.Module, the model to extract the layers from
     """
     if hasattr(model, "model"):
-        if hasattr(model.model, "layers"):
-            layers = model.model.layers
-        else:
-            if hasattr(model.model, "decoder"):
-                layers = model.model.decoder.layers
-            else:
-                raise NotImplementedError
-    elif hasattr(model, "transformer"):
-        layers = model.transformer.h
+        return get_layers_list(model.model)
+    if hasattr(model, "transformer"):
+        return get_layers_list(model.transformer)
+    if hasattr(model, "language_model"):
+        return get_layers_list(model.language_model)
+    if hasattr(model, "decoder"):
+        return get_layers_list(model.decoder)
+
+    if hasattr(model, "layers"):
+        layers = model.layers
+    elif hasattr(model, "h"):
+        layers = model.h
     else:
         raise NotImplementedError
     return layers
