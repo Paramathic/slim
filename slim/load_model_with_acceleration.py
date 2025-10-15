@@ -38,7 +38,7 @@ from slim.eval import eval_ppl_wikitext
 from slim.data import get_wikitext2
 
 
-def load_compressed_model(model_path, device_map):
+def load_compressed_model(model_path, device_map="auto"):
     """
     Load a compressed model from the specified path.
 
@@ -394,7 +394,9 @@ def replace_module(
 def load_and_accelerate_model(checkpoint_path):
     model, tokenizer, args, lora_hooks = load_compressed_model(checkpoint_path)
 
-    if not args.get("column_wise_grouping", False):
+    if (not args.get("column_wise_grouping", False)) and args.get(
+        "tiled_weight_quantization", False
+    ):
         raise NotImplementedError("Row-wise grouping is not supported at the moment")
 
     if not args.get("slim_quant", False) and not args.get(
