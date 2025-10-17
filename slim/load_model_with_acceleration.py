@@ -89,7 +89,7 @@ def load_compressed_model(model_path, device_map="auto"):
     print("Loading state dictionary...")
     final_state_dict = {}
 
-    # Use model.safetensors.index.json to figure out the filenames
+    # Use model.safetensors.index.json to figure out the filenames for larger models
     try:
         with open(os.path.join(model_path, "model.safetensors.index.json")) as f:
             index_data = json.load(f)
@@ -398,6 +398,9 @@ def load_and_accelerate_model(checkpoint_path):
         "tiled_weight_quantization", False
     ):
         raise NotImplementedError("Row-wise grouping is not supported at the moment")
+    
+    if not args.get("quantize_weight", False):
+        raise NotImplementedError("Acceleration is only supported for quantized models")
 
     if not args.get("slim_quant", False) and not args.get(
         "tiled_weight_quantization", False
