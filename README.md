@@ -1,3 +1,7 @@
+<div style="text-align: center;">
+<img src="./assets/SLiM-Logo.png" alt="SLiM" width="200">  
+</div>
+
 # SLiM: One-shot Quantized Sparse Plus Low-rank Approximation of LLMs
 
 This repository contains the implementation of SLiM (Sparse Low-rank Approximation with Quantization), a novel 
@@ -27,6 +31,8 @@ pip install -r requirements.txt
 Our code base supports multiple pruning, quantization, and low-rank approximation techniques. Below, we provide an 
 example and a brief description of how to use our code base. For a more automated and detailed example, please refer to
 [srcipts/run.sh](scripts/run.sh).
+
+Also, an interactive Google Colab notebook is available at [SLiM Colab Notebook](https://colab.research.google.com/drive/10ysTtwiFvyMYZooNqZK2g8kz3mN55309?usp=sharing).
 
 **Model and Tokenizer Instantiation:** Our code base supports models from HuggingFace's transformers library. In this example, we use
 the OPT-125M model from [facebook/opt-125m](https://huggingface.co/facebook/opt-125m). Please note that we load the model in CPU to reduce memory overheads 
