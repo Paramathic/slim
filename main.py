@@ -137,7 +137,7 @@ def main():
     parser.add_argument("--bitwidth", type=int, default=8)
     parser.add_argument("--quantize_weight", action="store_true")
     parser.add_argument("--tiled_weight_quantization", action="store_true")
-    parser.add_argument("--weight_tile_size", type=int, default=256)
+    parser.add_argument("--weight_tile_size", type=int, default=128)
     parser.add_argument(
         "--calibration_dataset", type=str, default="c4", choices=["c4", "slimpajama"]
     )
