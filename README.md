@@ -1,5 +1,5 @@
 <div align="center">
-<img src="./assets/SLiM-Logo.png" alt="SLiM" width="400">  
+<img src="./assets/SLiM-Logo.png" alt="SLiM" width="300">  
 </div>
 
 # SLiM: One-shot Quantized Sparse Plus Low-rank Approximation of LLMs
