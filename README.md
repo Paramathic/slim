@@ -143,7 +143,7 @@ check_sparsity(model)
 
 **Save Checkpoint:** You can save the compressed model (with the quantization metadata) using `save_model` function. The pruning, quantization, and low-rank adapter arguments will be stored with the model as well for future reference.
 
-```
+```python
 from slim.save_model import save_model
 
 save_model(model, args.save_checkpoint_path, args)
