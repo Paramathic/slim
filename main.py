@@ -398,28 +398,29 @@ def main():
         print("*" * 30)
         ################################################################
 
-        lmharness_results = {}
-        model = model.cpu()
-        torch.cuda.empty_cache()
-        lm_eval_model._model.load_state_dict(model.state_dict(), strict=True)
-        if is_distributed:
-            lm_eval_model._model = lm_eval_model._model.to(local_rank)
-        else:
-            lm_eval_model._model = distribute_model(lm_eval_model._model)
+    lmharness_results = {}
+    model = model.cpu()
+    torch.cuda.empty_cache()
+    lm_eval_model._model.load_state_dict(model.state_dict(), strict=True)
+    if is_distributed:
+        lm_eval_model._model = lm_eval_model._model.to(local_rank)
+    else:
+        lm_eval_model._model = distribute_model(lm_eval_model._model)
 
-        if args.test_lmharness:
-            results = lm_eval.simple_evaluate(
-                model=lm_eval_model,
-                tasks=[
-                    "mmlu",
-                    "piqa",
-                    "arc_easy",
-                    "arc_challenge",
-                    "winogrande",
-                    "openbookqa",
-                ],
-                verbosity="ERROR",
-            )
+    if args.test_lmharness:
+        results = lm_eval.simple_evaluate(
+            model=lm_eval_model,
+            tasks=[
+                "mmlu",
+                "piqa",
+                "arc_easy",
+                "arc_challenge",
+                "winogrande",
+                "openbookqa",
+            ],
+            verbosity="ERROR",
+        )
+        if local_rank == 0:
             lmharness_results["mmlu"] = results["results"]["mmlu"]["acc,none"]
             lmharness_results["piqa"] = results["results"]["piqa"]["acc,none"]
             lmharness_results["arc_easy"] = results["results"]["arc_easy"]["acc,none"]
@@ -438,10 +439,10 @@ def main():
             average = np.mean(average)
             lmharness_results["average"] = average
             print("LM Harness Results: ", lmharness_results)
-
-            # Log LM Harness results to wandb
-            if args.use_wandb:
-                wandb.log(lmharness_results)
+    if rank == 0:
+        # Log LM Harness results to wandb
+        if args.use_wandb:
+            wandb.log(lmharness_results)
 
         if args.output_csv_path:
             add_result_to_csv(args, ppl_test, lmharness_results)
