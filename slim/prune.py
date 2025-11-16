@@ -46,6 +46,7 @@ def prepare_calibration_input(model, dataloader, nsamples=128):
         def __init__(self, module):
             super().__init__()
             self.module = module
+            self.attention_type = getattr(module, "attention_type", None)
 
         def forward(self, inp, **kwargs):
             inps[cache["i"]] = inp.to(input_device)
