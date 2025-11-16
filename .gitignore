@@ -1,2 +1,7 @@
 *__pycache__*
 .idea
+checkpoints
+wandb
+output/
+*.out
+results/
