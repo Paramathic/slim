@@ -220,7 +220,7 @@ def fine_tune(
     dataset_config_name=None,
     validation_split_percentage=5,
     streaming=False,
-    preprocessing_num_workers=os.cpu_count,
+    preprocessing_num_workers=os.cpu_count(),
     overwrite_cache=False,
     block_size=None,
     max_train_samples=30000,
