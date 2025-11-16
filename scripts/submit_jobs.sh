@@ -2,10 +2,10 @@
 
 # --- Configuration ---
 # Define the ranges for your hyperparameters
-MODEL_NAMES=("llama3.1")
+MODEL_NAMES=("qwen2.5")
 STRUCTURES=("2:4")
 SPARSITY_RATIO=(0.5)
-METHODS=(maskllm)
+METHODS=(wanda sparsegpt)
 LORA_RANKS=(0)
 SLIM_LORAS=(true)
 SEPARATE_LORA=true
@@ -21,9 +21,9 @@ SLIM_QUANTS=(false)
 LOCAL_FILES_ONLY=true
 EVAL_DATASET="wikitext2"
 EVALUATE_PERPLEXITY=true
-TEST_LMHARNESS=false #true
+TEST_LMHARNESS=true
 FINE_TUNE=(true)
-OPTIMIZER="adafactor"
+OPTIMIZER="adamw_torch"
 SCALE_IMPORTANT_WEIGHTS=false
 TARGET_SPARSITY=0.45
 MASKLLM_CHECKPOINT="tiled_models/Llama-3.1-8B_LR0.0001_REG3.0_OPTadamw_torch_Prune-sparsegpt_Sparsity0.5-${TARGET_SPARSITY}_T2.0-0.05_S100.0-500.0_STR3.0_WREG0.1.pt"
@@ -33,20 +33,20 @@ INPUT_GROUP_SIZE=-1
 JOINT_PQ_MIXING_FACTOR=2.1
 WANDB=true
 HF_TOKEN="HF_TOKEN_PLACEHOLDER"
-OUTPUT_CSV_FILE="results/results_0.45.csv"
-PARALLELISM="data_parallel"
-FINETUNE_TOKEN_COUNT=300000
-WEIGHT_DECAYS=(1e-2 1e-3)
-FINE_TUNING_GLOBAL_BATCH_SIZE=128
+OUTPUT_CSV_FILE="results/wanda_sparsegpt_ft.csv"
+PARALLELISM="model_parallel"
+FINETUNE_TOKEN_COUNT=560000
+WEIGHT_DECAYS=(0.0)
+FINE_TUNING_GLOBAL_BATCH_SIZE=256
 LEARNING_RATES=(1e-4 5e-5 1e-5)
 CLUSTER="trillium"
 
 
-NGPUS_PER_NODE=4
+NGPUS_PER_NODE=1
 NTASKS_PER_NODE=$((12 * NGPUS_PER_NODE))
 MEM=$((64 * NGPUS_PER_NODE))
 GPU_TYPE=""
-TIME="7:00:00"
+TIME="24:00:00"
 
 
 for MODEL_NAME in "${MODEL_NAMES[@]}"
@@ -79,8 +79,16 @@ do
     elif [ $MODEL_NAME == 'gemma3' ]
     then
         MODEL_PREFIX=google/gemma-3-
-        MODEL_SIZE_LIST='1b 4b'
+        MODEL_SIZE_LIST='1b'
         MODEL_POSTFIX='-pt'
+    elif [ $MODEL_NAME == 'qwen2.5' ]
+    then
+        MODEL_PREFIX="Qwen/Qwen2.5-"
+        MODEL_SIZE_LIST="0.5B"
+        MODEL_POSTFIX=""
+    else
+        echo "Unknown model name: $MODEL_NAME"
+        exit 1
     fi
 
     # --- Loop through hyperparameter combinations ---
@@ -116,7 +124,7 @@ do
                                                 # Construct the arguments for the script
                                                 
 
-                                                sbatch --account=def-mmehride \
+                                                sbatch --account=rrg-mmehride \
                                                     --job-name="${GPU_TYPE}${JOB_NAME}" \
                                                     --gpus-per-node=${NGPUS_PER_NODE} \
                                                     --ntasks-per-node=${NTASKS_PER_NODE} \

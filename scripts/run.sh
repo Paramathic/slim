@@ -15,7 +15,7 @@ export TRITON_CACHE_DIR="/tmp"
 NUM_GPUS=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
 
 
-for MODEL_NAME in llama3.2 # llama3.2 #opt #llama2 #llama3.1
+for MODEL_NAME in qwen2.5 # llama3.2 #opt #llama2 #llama3.1
 do
     if [ $MODEL_NAME == 'llama2' ]
     then
@@ -42,13 +42,21 @@ do
         MODEL_PREFIX=meta-llama/Meta-Llama-3-
         MODEL_SIZE_LIST="8B"
         MODEL_POSTFIX=""
+    elif [ $MODEL_NAME == 'qwen2.5' ]
+    then
+        MODEL_PREFIX="Qwen/Qwen2.5-"
+        MODEL_SIZE_LIST="0.5B"
+        MODEL_POSTFIX=""
+    else
+        echo "Unknown model name: $MODEL_NAME"
+        exit 1
     fi
 
     for MODEL_SIZE in $MODEL_SIZE_LIST
     do
-        for STRUCTURE in 2:4 #unstructured
+        for STRUCTURE in 2:4
         do
-            for METHOD in maskllm #sparsegpt #maskllm sparsegpt joint_pq
+            for METHOD in wanda #sparsegpt #maskllm sparsegpt joint_pq
             do
                 for LORA_RANK in 0 #0.1
                 do
@@ -60,7 +68,7 @@ do
                             do
                                 for TILED_WEIGHT_QUANTIZATION in '--tiled_weight_quantization'
                                 do
-                                    for LEARNING_RATE in 1e-5 5e-5 1e-4 5e-4
+                                    for LEARNING_RATE in 1e-5 #5e-5 1e-4 5e-4
                                     do
                                         LOCAL_FILES_ONLY='--local_files_only'
                                         SPARSITY_RATIO=0.5
@@ -71,10 +79,10 @@ do
                                         # SLIM_QUANT='--slim_quant'
                                         EVAL_BATCH_SIZE=1
                                         SEPARATE_LORA='--separate_lora'
-                                        # TEST_LMHARNESS='--test_lmharness'
+                                        TEST_LMHARNESS='--test_lmharness'
                                         FINE_TUNE='--fine_tune'
                                         EVALUATE_PERPLEXITY='--evaluate_perplexity'
-                                        OPTIMIZER="adafactor"
+                                        OPTIMIZER="adamw_torch"
         #                                PRUNE_LORA="--prune_lora"
                                         QUANTIZE_LORA="--quantize_lora"
                                         LORA_TILE_SIZE=128
@@ -94,10 +102,10 @@ do
                                             SAVE_CHECKPOINT_PATH="${SAVE_CHECKPOINT_PATH}_ft_lr${LEARNING_RATE}"
                                         fi
                                         COLUMN_WISE_GROUPING="--column_wise_grouping"
-                                        PARALLELISM="data_parallel"
-                                        FINETUNE_TOKEN_COUNT=3000
+                                        PARALLELISM="model_parallel"
+                                        FINETUNE_TOKEN_COUNT=560000
                                         WEIGHT_DECAY=1e-2
-                                        FINE_TUNING_GLOBAL_BATCH_SIZE=128
+                                        FINE_TUNING_GLOBAL_BATCH_SIZE=256
 
                                         if [ "$PARALLELISM" = "data_parallel" ]; then
                                             echo "Using data parallelism with $NUM_GPUS GPUs"
@@ -125,7 +133,7 @@ do
                                             --eval_batch_size $EVAL_BATCH_SIZE \
                                             $SEPARATE_LORA \
                                             $TEST_LMHARNESS \
-                                            --output_csv_path results/lr_test.csv \
+                                            --output_csv_path results/fine_tune.csv \
                                             $FINE_TUNE \
                                             $EVALUATE_PERPLEXITY \
                                             $LOCAL_FILES_ONLY \
