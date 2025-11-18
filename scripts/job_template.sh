@@ -26,24 +26,26 @@ ARG_LOCAL_FILES_ONLY="${18:-'false'}"
 ARG_EVAL_DATASET="${19:-wikitext2}"
 ARG_EVALUATE_PERPLEXITY="${20:-'true'}"
 ARG_TEST_LMHARNESS="${21:-'false'}"
-ARG_FINE_TUNE="${22:-'false'}"
-ARG_OPTIMIZER="${23:-adafactor}"
-ARG_SCALE_IMPORTANT_WEIGHTS="${24:-'false'}"
-ARG_MASKLLM_CHECKPOINT="${25:-""}"
-ARG_QUANTIZE_INPUT="${26:-'false'}"
-ARG_INPUT_BITWIDTH="${27:-8}"
-ARG_INPUT_GROUP_SIZE="${28:-128}"
-ARG_JOINT_PQ_MIXING_FACTOR="${29:-2.1}"
-ARG_WANDB="${30:-'true'}"
-ARG_HF_TOKEN="${31:-""}"
-ARG_SAVE_CHECKPOINT_PATH="${32:-'checkpoints/${ARG_MODEL_NAME}_${ARG_METHOD}_${ARG_STRUCTURE}_lr${ARG_LORA_RANK}_sparsity${ARG_SPARSITY_RATIO}'}"
-ARG_OUTPUT_CSV_FILE="${33:-'results/results.csv'}"
-ARG_PARALLELISM="${34:-'data_parallel'}"
-ARG_FINETUNE_TOKEN_COUNT="${35:-300000}"
-ARG_WEIGHT_DECAY="${36:-1e-2}"
-ARG_FINE_TUNING_GLOBAL_BATCH_SIZE="${37:-128}"
-ARG_LEARNING_RATE="${38:-1e-5}"
-ARG_CLUSTER="${39:-'trillium'}" # 'trillium' or 'narval'
+ARG_LM_HARNESS_TASKS="${22:-'mmlu piqa arc_easy arc_challenge winogrande openbookqa'}"
+ARG_FINE_TUNE="${23:-'false'}"
+ARG_OPTIMIZER="${24:-adafactor}"
+ARG_SCALE_IMPORTANT_WEIGHTS="${25:-'false'}"
+ARG_MASKLLM_CHECKPOINT="${26:-""}"
+ARG_QUANTIZE_INPUT="${27:-'false'}"
+ARG_INPUT_BITWIDTH="${28:-8}"
+ARG_INPUT_GROUP_SIZE="${29:-128}"
+ARG_JOINT_PQ_MIXING_FACTOR="${30:-2.1}"
+ARG_WANDB="${31:-'true'}"
+ARG_HF_TOKEN="${32:-""}"
+ARG_SAVE_CHECKPOINT_PATH="${33:-'checkpoints/${ARG_MODEL_NAME}_${ARG_METHOD}_${ARG_STRUCTURE}_lr${ARG_LORA_RANK}_sparsity${ARG_SPARSITY_RATIO}'}"
+ARG_OUTPUT_CSV_FILE="${34:-'results/results.csv'}"
+ARG_PARALLELISM="${35:-'data_parallel'}"
+ARG_FINETUNE_TOKEN_COUNT="${36:-300000}"
+ARG_WEIGHT_DECAY="${37:-1e-2}"
+ARG_FINE_TUNING_GLOBAL_BATCH_SIZE="${38:-128}"
+ARG_LEARNING_RATE="${39:-1e-5}"
+ARG_FINE_TUNING_SEQLEN="${40:-4096}"
+ARG_CLUSTER="${41:-'trillium'}" # 'trillium' or 'narval'
 
 
 SCRIPT_TO_RUN=scripts/run_slim_args.sh
@@ -139,6 +141,7 @@ bash ${SINGULARITY_CMD} \
     "${ARG_EVAL_DATASET}" \
     "${ARG_EVALUATE_PERPLEXITY}" \
     "${ARG_TEST_LMHARNESS}" \
+    "${ARG_LM_HARNESS_TASKS}" \
     "${ARG_FINE_TUNE}" \
     "${ARG_OPTIMIZER}" \
     "${ARG_SCALE_IMPORTANT_WEIGHTS}" \
@@ -155,7 +158,8 @@ bash ${SINGULARITY_CMD} \
     "${ARG_FINETUNE_TOKEN_COUNT}" \
     "${ARG_WEIGHT_DECAY}" \
     "${ARG_FINE_TUNING_GLOBAL_BATCH_SIZE}" \
-    "${ARG_LEARNING_RATE}"
+    "${ARG_LEARNING_RATE}" \
+    "${ARG_FINE_TUNING_SEQLEN}"
 
 echo $ARG_WANDB
 

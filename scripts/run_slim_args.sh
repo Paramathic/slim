@@ -31,23 +31,25 @@ LOCAL_FILES_ONLY="${18:-'false'}"
 EVAL_DATASET="${19:-wikitext2}"
 EVALUATE_PERPLEXITY="${20:-'true'}"
 TEST_LMHARNESS="${21:-'false'}"
-FINE_TUNE="${22:-'false'}"
-OPTIMIZER="${23:-adafactor}"
-SCALE_IMPORTANT_WEIGHTS="${24:-'false'}"
-MASKLLM_CHECKPOINT="${25:-""}"
-QUANTIZE_INPUT="${26:-'false'}"
-INPUT_BITWIDTH="${27:-8}"
-INPUT_GROUP_SIZE="${28:-128}"
-JOINT_PQ_MIXING_FACTOR="${29:-2.1}"
-WANDB="${30:-'true'}"
-HF_TOKEN="${31:-""}"
-SAVE_CHECKPOINT_PATH="${32:-""}"
-OUTPUT_CSV_FILE="${33:-'results/results.csv'}"
-PARALLELISM="${34:-'data_parallel'}"
-FINETUNE_TOKEN_COUNT="${35:-300000}"
-WEIGHT_DECAY="${36:-1e-2}"
-FINE_TUNING_GLOBAL_BATCH_SIZE="${37:-128}"
-LEARNING_RATE="${38:-1e-5}"
+LM_HARNESS_TASKS="${22:-'mmlu piqa arc_easy arc_challenge winogrande openbookqa'}"
+FINE_TUNE="${23:-'false'}"
+OPTIMIZER="${24:-adafactor}"
+SCALE_IMPORTANT_WEIGHTS="${25:-'false'}"
+MASKLLM_CHECKPOINT="${26:-""}"
+QUANTIZE_INPUT="${27:-'false'}"
+INPUT_BITWIDTH="${28:-8}"
+INPUT_GROUP_SIZE="${29:-128}"
+JOINT_PQ_MIXING_FACTOR="${30:-2.1}"
+WANDB="${31:-'true'}"
+HF_TOKEN="${32:-""}"
+SAVE_CHECKPOINT_PATH="${33:-""}"
+OUTPUT_CSV_FILE="${34:-'results/results.csv'}"
+PARALLELISM="${35:-'data_parallel'}"
+FINETUNE_TOKEN_COUNT="${36:-300000}"
+WEIGHT_DECAY="${37:-1e-2}"
+FINE_TUNING_GLOBAL_BATCH_SIZE="${38:-128}"
+LEARNING_RATE="${39:-1e-5}"
+FINE_TUNING_SEQLEN="${40:-4096}"
 
 
 if [ "$SLIM_LORA" = "true" ]; then
@@ -128,6 +130,12 @@ else
     QUANTIZE_INPUT=""
 fi
 
+if [ -n "$LM_HARNESS_TASKS" ]; then
+    LM_HARNESS_TASKS_ARGS="--lm_harness_tasks $LM_HARNESS_TASKS"
+else
+    LM_HARNESS_TASKS_ARGS=""
+fi
+
 if [ "$WANDB" = "true" ]; then
     WANDB='--use_wandb'
 else
@@ -185,6 +193,7 @@ $STARTER_CMD main.py \
     --eval_batch_size $EVAL_BATCH_SIZE \
     $SEPARATE_LORA \
     $TEST_LMHARNESS \
+    $LM_HARNESS_TASKS_ARGS \
     --output_csv_path $OUTPUT_CSV_FILE \
     $FINE_TUNE \
     $EVALUATE_PERPLEXITY \
@@ -209,4 +218,5 @@ $STARTER_CMD main.py \
     --learning_rate $LEARNING_RATE \
     --finetune_token_count $FINETUNE_TOKEN_COUNT \
     --weight_decay $WEIGHT_DECAY \
-    --fine_tuning_global_batch_size $FINE_TUNING_GLOBAL_BATCH_SIZE
+    --fine_tuning_global_batch_size $FINE_TUNING_GLOBAL_BATCH_SIZE \
+    --fine_tuning_seqlen $FINE_TUNING_SEQLEN

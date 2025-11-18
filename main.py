@@ -45,12 +45,6 @@ CSV_COLUMNS = [
     "optimizer",
     "slim_quant",
     "perplexity",
-    "mmlu",
-    "piqa",
-    "arc_easy",
-    "arc_challenge",
-    "winogrande",
-    "openbookqa",
     "average",
 ]
 
@@ -60,20 +54,17 @@ def add_result_to_csv(args, ppl, lmharness_results):
     directory = os.path.dirname(args.output_csv_path)
     if not os.path.exists(directory):
         os.mkdir(directory)
+
+    all_columns = CSV_COLUMNS[:-1] + args.lm_harness_tasks + CSV_COLUMNS[-1:]
+
     if os.path.exists(args.output_csv_path):
         df = pd.read_csv(args.output_csv_path)
     else:
-        df = pd.DataFrame(columns=CSV_COLUMNS)
-
-    num_tasks = 8
+        df = pd.DataFrame(columns=all_columns)
 
     # Check if the row combination exists and update perplexity
-    new_row_data = {
-        column: getattr(args, column) for column in CSV_COLUMNS[:-num_tasks]
-    }
-    row_exists = df.index[
-        (df[CSV_COLUMNS[:-num_tasks]] == pd.Series(new_row_data)).all(axis=1)
-    ]
+    new_row_data = {column: getattr(args, column) for column in CSV_COLUMNS[:-2]}
+    row_exists = df.index[(df[CSV_COLUMNS[:-2]] == pd.Series(new_row_data)).all(axis=1)]
 
     # Now we don't mind adding perplexity
     new_row_data["perplexity"] = ppl
@@ -82,7 +73,7 @@ def add_result_to_csv(args, ppl, lmharness_results):
 
     if row_exists.empty:
         # Row combination does not exist, add a new row
-        new_row_df = pd.DataFrame([new_row_data], columns=CSV_COLUMNS)
+        new_row_df = pd.DataFrame([new_row_data], columns=all_columns)
         df = pd.concat([df, new_row_df], ignore_index=True)
     else:
         # Row combination exists, modify perplexity
@@ -158,6 +149,20 @@ def main():
     )
     parser.add_argument(
         "--test_lmharness", action="store_true", help="Whether to test LMEHarness tasks"
+    )
+    parser.add_argument(
+        "--lm_harness_tasks",
+        type=str,
+        nargs="+",
+        default=[
+            "mmlu",
+            "piqa",
+            "arc_easy",
+            "arc_challenge",
+            "winogrande",
+            "openbookqa",
+        ],
+        help="LM Harness tasks to evaluate",
     )
     parser.add_argument(
         "--fine_tune",
@@ -243,6 +248,12 @@ def main():
     )
     parser.add_argument(
         "--weight_decay", type=float, default=1e-2, help="Weight decay for fine-tuning"
+    )
+    parser.add_argument(
+        "--fine_tuning_seqlen",
+        type=int,
+        default=4096,
+        help="Sequence length for fine-tuning",
     )
 
     args = parser.parse_args()
@@ -355,6 +366,7 @@ def main():
             max_train_samples=args.finetune_token_count,
             global_batch_size=args.fine_tuning_global_batch_size,
             weight_decay=args.weight_decay,
+            block_size=args.fine_tuning_seqlen,
         )
         if rank == 0:
             report_gpu_memory("After Fine-tuning")
@@ -410,34 +422,19 @@ def main():
     if args.test_lmharness:
         results = lm_eval.simple_evaluate(
             model=lm_eval_model,
-            tasks=[
-                "mmlu",
-                "piqa",
-                "arc_easy",
-                "arc_challenge",
-                "winogrande",
-                "openbookqa",
-            ],
+            tasks=args.lm_harness_tasks,
             verbosity="ERROR",
         )
         if local_rank == 0:
-            lmharness_results["mmlu"] = results["results"]["mmlu"]["acc,none"]
-            lmharness_results["piqa"] = results["results"]["piqa"]["acc,none"]
-            lmharness_results["arc_easy"] = results["results"]["arc_easy"]["acc,none"]
-            lmharness_results["arc_challenge"] = results["results"]["arc_challenge"][
-                "acc,none"
-            ]
-            lmharness_results["winogrande"] = results["results"]["winogrande"][
-                "acc,none"
-            ]
-            lmharness_results["openbookqa"] = results["results"]["openbookqa"][
-                "acc,none"
-            ]
+            for task in args.lm_harness_tasks:
+                if task in results["results"]:
+                    lmharness_results[task] = results["results"][task]["acc,none"]
             average = []
             for task in lmharness_results:
                 average.append(lmharness_results[task])
-            average = np.mean(average)
-            lmharness_results["average"] = average
+            if average:
+                average = np.mean(average)
+                lmharness_results["average"] = average
             print("LM Harness Results: ", lmharness_results)
     if rank == 0:
         # Log LM Harness results to wandb

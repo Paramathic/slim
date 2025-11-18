@@ -80,7 +80,8 @@ do
                                         EVAL_BATCH_SIZE=1
                                         SEPARATE_LORA='--separate_lora'
                                         TEST_LMHARNESS='--test_lmharness'
-                                        FINE_TUNE='--fine_tune'
+                                        LM_HARNESS_TASKS="--lm_harness_tasks mmlu piqa arc_easy arc_challenge winogrande openbookqa race hellaswag"
+                                        # FINE_TUNE='--fine_tune'
                                         EVALUATE_PERPLEXITY='--evaluate_perplexity'
                                         OPTIMIZER="adamw_torch"
         #                                PRUNE_LORA="--prune_lora"
@@ -106,6 +107,7 @@ do
                                         FINETUNE_TOKEN_COUNT=560000
                                         WEIGHT_DECAY=1e-2
                                         FINE_TUNING_GLOBAL_BATCH_SIZE=256
+                                        FINE_TUNING_SEQLEN=4096
 
                                         if [ "$PARALLELISM" = "data_parallel" ]; then
                                             echo "Using data parallelism with $NUM_GPUS GPUs"
@@ -133,7 +135,8 @@ do
                                             --eval_batch_size $EVAL_BATCH_SIZE \
                                             $SEPARATE_LORA \
                                             $TEST_LMHARNESS \
-                                            --output_csv_path results/fine_tune.csv \
+                                            $LM_HARNESS_TASKS \
+                                            --output_csv_path results/tmp.csv \
                                             $FINE_TUNE \
                                             $EVALUATE_PERPLEXITY \
                                             $LOCAL_FILES_ONLY \
@@ -160,7 +163,8 @@ do
                                             --learning_rate $LEARNING_RATE \
                                             --finetune_token_count $FINETUNE_TOKEN_COUNT \
                                             --weight_decay $WEIGHT_DECAY \
-                                            --fine_tuning_global_batch_size $FINE_TUNING_GLOBAL_BATCH_SIZE 
+                                            --fine_tuning_global_batch_size $FINE_TUNING_GLOBAL_BATCH_SIZE \
+                                            --fine_tuning_seqlen $FINE_TUNING_SEQLEN
                                     done
                                 done
                             done

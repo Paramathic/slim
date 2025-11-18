@@ -22,6 +22,7 @@ LOCAL_FILES_ONLY=true
 EVAL_DATASET="wikitext2"
 EVALUATE_PERPLEXITY=true
 TEST_LMHARNESS=true
+LM_HARNESS_TASKS=("mmlu" "piqa" "arc_easy" "arc_challenge" "winogrande" "openbookqa")
 FINE_TUNE=(true)
 OPTIMIZER="adamw_torch"
 SCALE_IMPORTANT_WEIGHTS=false
@@ -39,6 +40,7 @@ FINETUNE_TOKEN_COUNT=560000
 WEIGHT_DECAYS=(0.0)
 FINE_TUNING_GLOBAL_BATCH_SIZE=256
 LEARNING_RATES=(1e-4 5e-5 1e-5)
+FINE_TUNING_SEQLEN=4096
 CLUSTER="trillium"
 
 
@@ -151,6 +153,7 @@ do
                                                     "${EVAL_DATASET}" \
                                                     "${EVALUATE_PERPLEXITY}" \
                                                     "${TEST_LMHARNESS}" \
+                                                    "${LM_HARNESS_TASKS[*]}" \
                                                     "${FINE_TUNE}" \
                                                     "${OPTIMIZER}" \
                                                     "${SCALE_IMPORTANT_WEIGHTS}" \
@@ -168,6 +171,7 @@ do
                                                     "${WEIGHT_DECAY}" \
                                                     "${FINE_TUNING_GLOBAL_BATCH_SIZE}" \
                                                     "${LEARNING_RATE}" \
+                                                    "${FINE_TUNING_SEQLEN}" \
                                                     "${CLUSTER}"
                                             
                                             done
