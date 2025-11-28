@@ -58,6 +58,8 @@ def get_layers_list(model):
         return get_layers_list(model.language_model)
     if hasattr(model, "decoder"):
         return get_layers_list(model.decoder)
+    if hasattr(model, "module"):
+        return get_layers_list(model.module)
 
     if hasattr(model, "layers"):
         layers = model.layers
